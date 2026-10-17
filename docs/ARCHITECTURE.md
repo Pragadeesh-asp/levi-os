@@ -22,7 +22,8 @@ every rule is the same:
 ├─────────────────────────────────────────────────────────────────┤
 │ Domain engines (pure, tested)                                   │
 │   progression.ts · habits.ts · finance.ts · dates.ts · review.ts│
-│   input-validation.ts · quest-validation.ts                     │
+│   focus.ts · ordering.ts · input-validation.ts                  │
+│   quest-validation.ts                                           │
 ├─────────────────────────────────────────────────────────────────┤
 │ PostgreSQL (supabase/migrations/**)                             │
 │   constraints + RLS + security-definer RPCs are the last word   │
@@ -104,8 +105,15 @@ cannot drift from the events that produced it. The SQL view `player_stats` expos
 - **Change state:** only `set_mission_status(...)` / `reopen_mission(...)`. There is no
   table-wide `update` grant on `daily_missions`; the client holds a **column-level** grant
   on the plan columns only (`title`, `priority`, `estimate_minutes`, `success_criteria`,
-  `notes`, `mission_date`, `position`). A direct `status = 'completed'` write is rejected
-  by Postgres itself, so a mission cannot be marked complete without the matching XP event.
+  `notes`, `mission_date`). A direct `status = 'completed'` write is rejected by Postgres
+  itself, so a mission cannot be marked complete without the matching XP event.
+- **Order:** `position` is deliberately **not** one of the client-editable plan columns.
+  `reorder_missions(p_mission_date, p_ids uuid[])` takes *every* mission of one local day,
+  exactly once, all owned by the caller, and rewrites their positions to `0..n-1` in that
+  order. A partial list, a duplicate, a null entry or another user's mission is rejected —
+  so a day can never end up with two missions sharing a position. The UI sends only
+  "which mission moved which way"; the server rebuilds the full list from the stored rows,
+  which makes a stale form a no-op instead of a corruption.
 - **Delete:** allowed only while the mission has never awarded XP (enforced by trigger);
   otherwise reopen or skip it.
 - **Invariant:** `daily_missions_state_check` requires a `completed_at` for completed
@@ -117,6 +125,40 @@ cannot drift from the events that produced it. The SQL view `player_stats` expos
 - `habit_logs` is **SELECT-only** for clients; writes go through `log_habit(...)`, which is
   idempotent and moves the XP to match the row's state.
 - Archiving (`archived_at`) hides a habit without deleting its history or its XP.
+
+### Focus sessions (`focus_sessions`)
+
+A focus session is one measured block of attention, and deliberately the *least* rewarding
+feature in the system:
+
+- **Measured, never typed.** `start_focus_session(intent, mission_id?)` and
+  `end_focus_session(session_id, discard?)` are the only write paths. Both timestamps come
+  from `now()`; the duration is `ended_at - started_at`, clamped at zero. No client-supplied
+  number participates.
+- **One running session per user**, enforced by a partial unique index
+  (`unique (user_id) where ended_at is null`). Starting a second session fails with a clear
+  message instead of silently closing the first — the first session's record must stay
+  honest, even across two tabs or two devices.
+- **Interrupted sessions are recorded, not fabricated.** Ending is idempotent: a double
+  submit reports the stored truth and changes nothing. A session that was left running
+  (closed tab, dead battery) can be **discarded**: `ended_reason = 'discarded'`, the row is
+  kept, and its time is never counted. The UI suggests discarding after
+  `STALE_SESSION_HOURS` (12 h), but never decides it for the user.
+- **No XP — on purpose.** Time on a clock is not evidence of an outcome, and a per-minute
+  reward would be the easiest thing in the system to farm. The test suite asserts that the
+  focus RPCs write nothing to `xp_ledger`. A future reward rule would need its own migration
+  and its own assertions.
+- **A session belongs to the local day it started on**, even when it ran past midnight.
+  `focus_summary(date, time_zone)` returns sessions started / completed / discarded / open
+  and `focused_seconds`, which counts **completed** sessions only. `focus_session_log`
+  (a `security_invoker` view) dates every session in the caller's zone, so no screen does
+  time-zone arithmetic.
+- **Read-only for clients.** There is no insert/update/delete grant or policy on
+  `focus_sessions`; a session can only be started or ended through the RPCs above.
+
+Linking a session to a mission is optional and checked twice: the RPC verifies ownership,
+and a trigger repeats the check so no future write path can forget it. A link is a pointer,
+never a claim that the mission is done.
 
 ## 5. The one streak rule
 
@@ -184,6 +226,12 @@ Two consequences are deliberate:
 The screen `/review?date=` renders this row verbatim and computes nothing; the clamp that
 stops a review looking into the future lives in `src/lib/review.ts` and is unit-tested.
 
+Focus time on the same day comes from `focus_summary(p_date, p_time_zone)`, which follows
+the same local-day rule: a session belongs to the day it started on, an open session is
+reported as open and counts zero, and only a session ended as `completed` contributes
+seconds. The review screen lists the sessions beside the totals, so a discarded one is
+visibly a record and not a number.
+
 ## 8. Authorization
 
 - Every table used by a user is protected by **row level security** tied to `auth.uid()`.
@@ -195,8 +243,12 @@ stops a review looking into the future lives in `src/lib/review.ts` and is unit-
   `search_path = public`; `execute` is granted to `authenticated` only.
 - Where a client genuinely edits rows (a mission plan, a quest title, a display name),
   the permission is granted **per column**, so the columns that carry meaning (`status`,
-  `completed_at`, `outcome`, `time_zone`, `user_id`) stay writable only through the
-  routines that own them.
+  `completed_at`, `outcome`, `time_zone`, `user_id`, `position`) stay writable only through
+  the routines that own them. Ordering therefore runs through `reorder_missions()`, never
+  through a plain `update`.
+- `focus_sessions` is **SELECT-only** for clients: writes are the two focus RPCs. That is a
+  privilege restriction as well as a policy choice, so a crafted request cannot bypass the
+  one-open-session rule or backdate a start.
 
 ## 9. Achievements
 

@@ -6,8 +6,8 @@ An ordered, executable roadmap for finishing LEVI OS — **not** replacing it.
 (something real exists, something real is missing) · ⏭ not started · 🔒 needs the project
 owner (credentials, cost, or a production write).
 
-_Last verified: 2026-10-18 · `npm run lint` · `npm run typecheck` · `npm test` (62 passed)
-· `npm run db:test` (8 migrations, 84 assertions) · `npm run build`._
+_Last verified: 2026-10-18 · `npm run lint` · `npm run typecheck` · `npm test` (75 passed)
+· `npm run db:test` (9 migrations, 122 assertions) · `npm run build`._
 
 ---
 
@@ -18,8 +18,8 @@ _Last verified: 2026-10-18 · `npm run lint` · `npm run typecheck` · `npm test
 | 1 | Remote Supabase integration & production verification | 🔒 ⏭ | Migrations are proven on a throwaway Postgres, never on the project. |
 | 2 | Mission undo/redo + historical day reviews | ✅ | Undo for skip/block, reopen for complete, `/review?date=` read-only. |
 | 3 | Habit backfill | ✅ | Past days can be logged; the future is rejected by the database. |
-| 4 | Focus sessions | ⏭ | No table, no timer. Design ready (Stage B). |
-| 5 | Persistent mission ordering | 🟡 | `position` exists and is honoured, but nothing lets the user set it. |
+| 4 | Focus sessions | ✅ | Measured sessions, one running per user, discard for interruptions, no XP. |
+| 5 | Persistent mission ordering | ✅ | `reorder_missions` + ↑/↓; the saved order is the order, priority is a label. |
 | 6 | Finance tracking (DB + UI) | 🟡 | Exact money engine is tested; no table, action or screen. |
 | 7 | Journaling and weekly reviews | ⏭ | Nothing stored; the quest engine is not a journal. |
 | 8 | Career and learning management | 🟡 | Modelable on the quest engine today; no module of its own. |
@@ -34,12 +34,13 @@ _Last verified: 2026-10-18 · `npm run lint` · `npm run typecheck` · `npm test
 
 | Phase | Outcome | Evidence |
 | --- | --- | --- |
-| 0 — Verification foundation ✅ | every migration applied to an empty Postgres, then asserted; CI runs it | `scripts/db-verify.mjs`, `npm run db:test` → **8 migrations / 84 assertions**, `.github/workflows/ci.yml` |
-| 1 — Canonical arithmetic ✅ | one formula per concern, in TS **and** SQL: levels, XP awards, streaks/consistency, calendar dates, money, input cleaning | `src/lib/{progression,habits,finance,dates,input-validation}.ts` + `src/lib/*.test.ts` (62 tests) |
+| 0 — Verification foundation ✅ | every migration applied to an empty Postgres, then asserted; CI runs it | `scripts/db-verify.mjs`, `npm run db:test` → **9 migrations / 122 assertions**, `.github/workflows/ci.yml` |
+| 1 — Canonical arithmetic ✅ | one formula per concern, in TS **and** SQL: levels, XP awards, streaks/consistency, calendar dates, money, input cleaning | `src/lib/{progression,habits,finance,dates,input-validation}.ts` + `src/lib/*.test.ts` (75 tests) |
 | 2 — Quest engine ✅ | main quests → subquests → evidenced steps; derived progress; the runtime ambiguity is fixed | `complete_quest_step`, `quest_progress`, assertions |
 | 3 — Core daily loop ✅ | missions (planned → active → completed/skipped/blocked, reasons required) and habits (scheduled weekdays, per-day logs, streaks, archive) | `set_mission_status`, `log_habit`, `habit_summary`, assertions |
 | 4 — Real-data Command Center ✅ | every screen reads RLS-scoped records (or shows an empty state); no mock data | `/dashboard`, `/missions`, `/habits`, `/quests`, `/settings`, `/review` all build as `ƒ` |
 | 5 — Daily loop completed ✅ | undo/redo, historical day review, backfill guard | Part 2.2, 2.3 below; 15 new assertions |
+| 6 — Focus + ordering ✅ | measured focus sessions with no XP; one strict order per day, owned by an RPC | Part 2.4, 2.5 below; 38 new assertions |
 
 **Phase 5 detail (delivered in this stage):**
 
@@ -56,13 +57,27 @@ _Last verified: 2026-10-18 · `npm run lint` · `npm run typecheck` · `npm test
   `log_habit` now rejects a **future** calendar date (using the caller's stored IANA zone)
   and a missing date; backfilling a past day still awards its 20 XP exactly once.
 
+**Phase 6 detail (delivered in this stage):**
+
+- **Focus sessions.** `/focus` starts and ends a measured session; `/review` shows the day's
+  sessions beside the totals. The database owns both timestamps, at most one session can be
+  open per user (partial unique index), ending twice is a no-op, and a session that was left
+  running can be *discarded*: the row stays, the time does not count.
+- **No XP, deliberately.** Minutes on a clock are not evidence of an outcome, and a
+  per-minute reward is trivial to farm. The plan's earlier sketch (1 XP per 10 recorded
+  minutes) was rejected; assertions prove the focus RPCs write nothing to `xp_ledger`.
+- **Persistent ordering.** `reorder_missions(date, ids)` rewrites one day's positions to
+  `0..n-1` from a complete, duplicate-free, owner-only list. `/missions` no longer sorts by
+  priority: priority is a badge, ↑/↓ move a mission, and the Command Center's "next up" is
+  the top of the same saved order.
+
 ---
 
 ## Part 2 — The remaining work, area by area
 
 ### 2.1 Remote Supabase integration and production verification 🔒
 
-- **Exists:** 8 migrations that apply cleanly, in order, to an empty Postgres; a fully
+- **Exists:** 9 migrations that apply cleanly, in order, to an empty Postgres; a fully
   asserted engine; a linked project ref in `supabase/.temp/`.
 - **Missing:** the migrations have never been applied to the project; the remote schema and
   data are unknown; auth email delivery is unverified; no deployed smoke test exists.
@@ -91,30 +106,42 @@ _Last verified: 2026-10-18 · `npm run lint` · `npm run typecheck` · `npm test
 - **Missing:** nothing functional. A calendar heat-map of logged days would make backfill
   more usable — that belongs to 2.12.
 
-### 2.4 Focus sessions ⏭
+### 2.4 Focus sessions ✅
 
-- **Missing:** everything. Suggested shape (Stage B, repo-only):
-  `focus_sessions(id, user_id, mission_id, habit_id, started_at, ended_at, minutes,
-  note)`; a **partial unique index** `unique (user_id) where ended_at is null` so only one
-  session is open at a time; `start_focus_session` / `end_focus_session` RPCs (idempotent:
-  ending an ended session changes nothing); minutes derived from the timestamps, never typed
-  in; XP only for *recorded* minutes (e.g. 1 XP per completed 10 minutes, capped), so the
-  ledger stays honest.
-- **Evidence required:** assertions for "only one open session", "ending twice does not
-  double-award", "a session cannot end before it started"; a timer UI that works without
-  JavaScript to *start*/*stop* (a plain form), enhanced client-side afterwards.
+- **Exists:** `focus_sessions`, `start_focus_session` / `end_focus_session`,
+  `focus_summary(date, time_zone)`, the `/focus` screen, a Focus panel on `/review`, and
+  assertions for every rule.
+- **Design decisions (delivered):** one open session per user via a partial unique index;
+  duration from the server's `now()` timestamps only; ending is idempotent; an interrupted
+  session is *discarded* (kept as a record, counted as zero); a session belongs to the local
+  day it started on; mission links are optional and ownership-checked twice (RPC + trigger).
+- **Deliberately not built:** XP for focus time. The earlier sketch (1 XP per completed 10
+  minutes, capped) would reward elapsed time rather than an outcome and is trivially
+  farmable. A future rule needs its own migration and its own assertions.
+- **Evidence:** _"starting a focus session opens exactly one…"_, _"a second focus session is
+  rejected while one runs"_, _"ending an already-ended session is a no-op…"_, _"a discarded
+  session contributes no focused time"_, _"focus sessions award no XP…"_, _"another user sees
+  no focus sessions"_; `src/lib/focus.test.ts`, `src/lib/dates.test.ts` (local clock times).
+- **Missing (not required here):** a live authenticated click-through; a native reminder to
+  end a forgotten session (the UI warns after 12 h instead).
 
-### 2.5 Persistent mission ordering 🟡
+### 2.5 Persistent mission ordering ✅
 
-- **Exists:** `daily_missions.position`, assigned as `max + 1` by `create_mission`, exposed
-  as a column-level update grant, ordered by in `getMissionsForDate`.
-- **Missing:** the UI sorts open missions by priority (`missionSortKey`) and the user cannot
-  set the order; two missions created out of order can only be reordered by editing their
-  dates.
-- **Next step (Stage B):** a `reorder_missions(p_date, p_ids uuid[])` RPC that rewrites
-  `position` for the caller's own rows in one transaction (asserted: the order round-trips,
-  foreign ids are rejected), plus ▲/▼ buttons that work without drag-and-drop. Explain in the
-  UI that manual order wins over the priority sort.
+- **Exists:** `reorder_missions(p_mission_date, p_ids uuid[])`, ↑/↓ on every open mission,
+  and a list that renders in the stored order on `/missions` and in the Command Center's
+  "next up".
+- **Rule:** the array must be every mission of that local day, exactly once, all owned by
+  the caller; positions are renumbered `0..n-1` in one transaction. `position` is no longer
+  in the client's column-level update grant, so the RPC is the only way to write it.
+- **Safety:** a stale form sends a mission id that is no longer open → the action re-reads
+  the day and changes nothing; a mission created between that read and the RPC makes the
+  order incomplete → the RPC rejects it and the user retries. Neither case corrupts the
+  order.
+- **Evidence:** _"the stored order is exactly the order that was requested…"_, _"positions
+  are renumbered to 0..n-1…"_, duplicate / partial / foreign / other-day rejection,
+  _"reordering preserves the state of completed and skipped missions"_, _"reordering never
+  awards or removes XP"_, _"positions are only writable through reorder_missions"_;
+  `src/lib/ordering.test.ts`.
 
 ### 2.6 Finance tracking with database integration and UI 🟡
 
@@ -198,8 +225,8 @@ testable from the repository, and leaves the application working.
 | Stage | Work | Why it is safe | Verification |
 | --- | --- | --- | --- |
 | **A** ✅ **done** | 2.2 undo/redo + day review, 2.3 backfill guard | additive migration; no existing table altered destructively; no new dependency | `db:test` 8 / 84, `npm test` 62, build |
-| **B** *(next)* | 2.4 focus sessions, 2.5 mission ordering | new table + RPCs; ordering only touches `position`, which is already granted and already ordered by | new assertions for one-open-session, idempotent end, order round-trip |
-| **C** | 2.12 analytics foundation, 2.2 action history | read-only views/RPCs next to `day_summary`; no schema churn | assertions that each trend equals the sum of its rows |
+| **B** ✅ **done** | 2.4 focus sessions, 2.5 mission ordering | new table + RPCs; `position` moved out of the client grant so ordering is RPC-only | `db:test` 9 / 122, `npm test` 75, build |
+| **C** *(next)* | 2.12 analytics foundation, 2.2 action history | read-only views/RPCs next to `day_summary`; no schema churn | assertions that each trend equals the sum of its rows |
 | **D** | 2.7 journal + weekly review, 2.10 scripture/prayer as journal kinds | one new table, RLS, no XP path | assertions for privacy and "review cites ledger totals" |
 | **E** | 2.8 career/learning, 2.9 knowledge library | new tables that link to existing quests; no new XP source | assertions for ownership + link integrity |
 | **F** 🔒 | 2.6 finance, 2.11 AI advisor | finance needs the owner's real data to be useful; the advisor needs a key | finance: balance-view assertions; advisor: no-write assertion |
@@ -209,7 +236,7 @@ testable from the repository, and leaves the application working.
 *safety*: it is the only step that writes to the live database, it needs credentials this
 session does not have, and it cannot be re-run blindly. Every extra migration also increases
 what has to be applied in one go — so the honest sequence is: finish the schema the product
-needs **or** apply the current, already-asserted 8 migrations deliberately and then keep
+needs **or** apply the current, already-asserted 9 migrations deliberately and then keep
 shipping additively. Both are safe; the unsafe version is pushing migrations while nobody is
 watching the production data. Part 4 makes either choice verifiable.
 
@@ -222,7 +249,7 @@ The repository cannot prove the remote state. This is the smallest checklist tha
 **Before**
 
 1. `supabase link --project-ref <ref>` (already linked per `supabase/.temp/`).
-2. `supabase db push --dry-run` — inspect that exactly the 8 migrations in
+2. `supabase db push --dry-run` — inspect that exactly the 9 migrations in
    `supabase/migrations/` will be applied, in timestamp order.
 3. Back up: `pg_dump "$DATABASE_URL" > levi-backup-<date>.sql` (schema + data).
 4. Confirm the two public env vars are set in the deployment
@@ -236,22 +263,28 @@ The repository cannot prove the remote state. This is the smallest checklist tha
 
 6. Magic link sign-in lands on `/dashboard` with level 1 and 0 XP.
 7. `/missions` — create a mission, Start, Complete → `+50 XP`; Reopen → XP removed; Complete
-   again → exactly `+50 XP` (not 100).
+   again → exactly `+50 XP` (not 100). Move it ↓ and refresh: the order persists.
 8. `/missions` — skip a mission with a reason, then **Undo** it back to `planned`.
 9. `/habits` — create a habit, Log today (+20), Undo today (−20), Log today again (+20).
 10. `/habits` — "Backfill another day" for yesterday → the log lands on yesterday; choosing a
     date in the future is refused by the database.
 11. `/review` — today and yesterday both render; a future `?date=` clamps to today; the XP
     line matches the ledger entries you just created.
-12. `/quests` — complete a step (evidence required), then a whole subquest → `+250 XP`.
-13. `/settings` — change the time zone; an invalid zone is rejected.
-14. Sign out → `/auth/signout` is POST-only and redirects to `/login`.
-15. Second account: it must see **none** of the first account's missions, habits, XP or
-    `/review` data.
+12. `/focus` — start a session (optionally linked to a mission); a second start is refused;
+    End records the elapsed time and awards **no XP**; start another, let it run, then
+    **Discard** → it stays listed, marked discarded, and "Focused today" does not move.
+13. `/review` — the focus tile and the day's sessions appear; a discarded session is listed
+    but contributes no time.
+14. `/quests` — complete a step (evidence required), then a whole subquest → `+250 XP`.
+15. `/settings` — change the time zone; an invalid zone is rejected.
+16. Sign out → `/auth/signout` is POST-only and redirects to `/login`.
+17. Second account: it must see **none** of the first account's missions, habits, focus
+    sessions, XP or `/review` data, and a crafted reorder of the first account's missions
+    must be rejected.
 
 **After**
 
-16. Record the output of steps 6–15 in this file (or `docs/FEATURE_STATUS.md`) with a date.
+18. Record the output of steps 6–17 in this file (or `docs/FEATURE_STATUS.md`) with a date.
     Anything not executed stays ⏭ — never marked verified from inspection.
 
 ---

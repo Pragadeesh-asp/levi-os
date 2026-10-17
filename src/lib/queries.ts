@@ -13,7 +13,6 @@ export type HabitLogRow = Tables<"habit_logs">;
 export type LevelHistoryRow = Views<"level_history">;
 export type AchievementRow = Tables<"achievements">;
 export type QuestStepRow = Tables<"quest_steps">;
-export type FocusSessionRow = Tables<"focus_sessions">;
 export type FocusSessionLogRow = Views<"focus_session_log">;
 
 export interface HabitSummary {
@@ -117,6 +116,16 @@ export async function getMissionHistory(
     .limit(limit);
   if (error) throw new Error(`Could not load mission history: ${error.message}`);
   return data ?? [];
+}
+
+/** One mission by id, used to name a record that points at it (e.g. a focus session). */
+export async function getMissionById(
+  supabase: SupabaseServerClient,
+  id: string,
+): Promise<MissionRow | null> {
+  const { data, error } = await supabase.from("daily_missions").select("*").eq("id", id).maybeSingle();
+  if (error) throw new Error(`Could not load the mission: ${error.message}`);
+  return data ?? null;
 }
 
 export async function getMissionsBetween(
@@ -246,8 +255,8 @@ export async function getFocusSummary(
 }
 
 /** The session running right now, if any. The database allows at most one. */
-export async function getRunningFocusSession(supabase: SupabaseServerClient): Promise<FocusSessionRow | null> {
-  const { data, error } = await supabase.from("focus_sessions").select("*").is("ended_at", null).maybeSingle();
+export async function getRunningFocusSession(supabase: SupabaseServerClient): Promise<FocusSessionLogRow | null> {
+  const { data, error } = await supabase.from("focus_session_log").select("*").is("ended_at", null).maybeSingle();
   if (error) throw new Error(`Could not load the running focus session: ${error.message}`);
   return data ?? null;
 }

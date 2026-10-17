@@ -5,7 +5,7 @@ Honest, per-feature status. **Statuses:** ✅ verified · 🟡 partial · ⏭ no
 code merely exists.
 
 _Last verified: 2026-10-18. Commands: `npm run lint` · `npm run typecheck` · `npm test`
-(62 passed) · `npm run db:test` (8 migrations, 84 assertions) · `npm run build`._
+(75 passed) · `npm run db:test` (9 migrations, 122 assertions) · `npm run build`._
 
 ## Foundation
 
@@ -52,6 +52,10 @@ _Last verified: 2026-10-18. Commands: `npm run lint` · `npm run typecheck` · `
 | Reasons required to skip/block | ✅ | constraint + action validation |
 | Mission XP (+50) and reversal | ✅ | reopen removes, re-complete restores (audit §4.3) |
 | Mission undo (skip/block → planned) | ✅ | "Undo" action; the reason is retracted, because the mission was not really skipped |
+| Persistent mission order (↑ / ↓) | ✅ | `moveMission` → `reorder_missions`; the whole day is rebuilt server-side and positions become `0..n-1` |
+| Invalid orders rejected | ✅ | assertions for duplicates, a partial list, a null entry, another day's mission and another user's mission |
+| Order survives a refresh | ✅ | `getMissionsForDate` orders by `(position, created_at)`; `/missions` and the Command Center's "next up" use it |
+| Priority is a label, not the order | ✅ | the open list is the user's saved order; priority is shown as a badge on the card |
 | Habits with weekday schedules | ✅ | `/habits` |
 | Habit logs (SELECT-only for clients) | ✅ | `log_habit` RPC; _"clients cannot write habit logs directly"_ |
 | Streaks (current/longest) | ✅ | `habit_summary`; Mon/Wed/Fri case asserted |
@@ -60,6 +64,20 @@ _Last verified: 2026-10-18. Commands: `npm run lint` · `npm run typecheck` · `
 | Undo a logged day | ✅ | "Undo today" action; XP removed, not duplicated |
 | Backfill a past habit day | ✅ | "Backfill another day" control; one row and one award per day |
 | Future habit days refused | ✅ | database guard against the caller's local today; _"a future habit day is rejected"_
+
+## Focus
+
+| Feature | Status | Evidence / notes |
+| --- | --- | --- |
+| Start / end a session | ✅ | `/focus`; `start_focus_session` / `end_focus_session` are the only write paths |
+| One running session per user | ✅ | partial unique index `(user_id) where ended_at is null`; _"the one running session rule is a real unique index"_ |
+| Duration from server timestamps | ✅ | `focus_session_log.elapsed_seconds` = `ended_at − started_at`; no client number participates |
+| Interrupted sessions | ✅ | **Discard** keeps the row with `ended_reason = 'discarded'` and counts no time; the UI warns after 12 h (`focus.ts`, tested) |
+| Double end is harmless | ✅ | idempotent: _"ending an already-ended session is a no-op that reports the truth"_ |
+| No XP | ✅ | _"focus sessions award no XP and write nothing to the ledger"_ |
+| Day attribution | ✅ | a session belongs to the local day it started on, even across midnight; `focus_summary(date, time_zone)` |
+| Read-only for clients | ✅ | SELECT-only grant; assertions for direct insert / update / delete |
+| Optional mission link, owned | ✅ | checked in the RPC **and** a trigger; a link never completes the mission |
 
 ## Day review
 
@@ -70,6 +88,7 @@ _Last verified: 2026-10-18. Commands: `npm run lint` · `npm run typecheck` · `
 | Missions by status | ✅ | counted from `daily_missions` rows with a reason or an outcome shown |
 | Habits logged vs expected | ✅ | expected is reconstructed from `created_at` / `archived_at` + schedule |
 | Achievements unlocked that day | ✅ | from `player_achievements` |
+| Focus sessions on the day | ✅ | `focus_summary` + `focus_session_log`; discarded sessions are listed but not counted |
 | Cannot look into the future | ✅ | `resolveReviewDate` clamps to today; `src/lib/review.test.ts` |
 | Date navigation | ✅ | previous / next / today + a date picker (`max` = today) |
 | Read-only by design | ✅ | resolving work stays on `/missions` and `/habits`, which it links to |
@@ -106,8 +125,6 @@ _Last verified: 2026-10-18. Commands: `npm run lint` · `npm run typecheck` · `
 | Feature | Status | Blocked by |
 | --- | --- | --- |
 | Remote Supabase push + production smoke test | 🔒 ⏭ | project owner (credentials, live data) |
-| Focus sessions / timer | ⏭ | nothing — next safe stage (B) |
-| Manual mission ordering UI | ⏭ | nothing — `position` already exists (stage B) |
 | Journal, weekly/monthly reviews | ⏭ | stage D |
 | Scripture and prayer journal | ⏭ | stage D (journal kinds) |
 | Career and learning module | 🟡 | modelable on quests today; module in stage E |
@@ -120,6 +137,11 @@ _Last verified: 2026-10-18. Commands: `npm run lint` · `npm run typecheck` · `
 
 - The Supabase migrations have **not** been applied to the remote project; the remote
   schema is unknown. Nothing here asserts the remote state.
+- **Authenticated UI flows are not exercised by the repository's checks.** Focus sessions,
+  mission ordering and the day review are asserted at the database level and their routes
+  build as dynamic, but no signed-in click-through is performed here (there is no test
+  account or local auth stack). That verification is owner-run — see
+  `docs/IMPLEMENTATION_PLAN.md` Part 4.
 - Auth email delivery depends on the Supabase project's configuration and cannot be
   verified from the repository.
 - `AGENTS.md` / `CLAUDE.md` are generated/maintained tooling notes at the repo root and

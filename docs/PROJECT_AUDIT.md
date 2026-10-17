@@ -140,6 +140,24 @@ describe now, and the missions page could only report its own rows.
   interaction is asserted in its own section, so the suite no longer depends on the time of
   day it runs at.
 
+### 4.8 Mission positions were writable by any client — **low (upgrade path) / medium (data integrity)**
+
+`position` was handed to clients as part of the plan-column `UPDATE` grant so that a mission
+could be "reordered", but nothing computed an order: a crafted request could write an
+arbitrary number, and two missions could share a position. The missions page ignored the
+column entirely and sorted by priority, so the stored order was dead data.
+
+- **Fix:** `supabase/migrations/20260918130000_focus_sessions_and_ordering.sql`:
+  - `reorder_missions(p_mission_date, p_ids uuid[])` takes the complete list for one local
+    day (no nulls, no duplicates, all owned, all on that date) and rewrites positions to
+    `0..n-1`; an incomplete or foreign list raises and changes nothing.
+  - `revoke update (position)` so the RPC is the only write path.
+  - `/missions` renders the stored order and offers ↑/↓; the Command Center's "next up" uses
+    the same order instead of a priority sort.
+- **Evidence:** 15 new ordering assertions, including _"positions are renumbered to 0..n-1
+  with no gaps and no duplicates"_, _"a partial order is rejected…"_, _"another user's
+  missions cannot be ordered"_ and _"positions are only writable through reorder_missions"_.
+
 ## 5. Unknowns and risks (do not assume)
 
 | Item | Detail |
@@ -152,16 +170,16 @@ describe now, and the missions page could only report its own rows.
 
 ## 6. Baseline verification (real output)
 
-_Stage A (undo/redo, day review, backfill guard) re-ran every script. Numbers below are the
+_Stage B (focus sessions, persistent ordering) re-ran every script. Numbers below are the
 current, real output._
 
 | Command | Result |
 | --- | --- |
 | `npm run lint` | 0 errors, 0 warnings |
 | `npm run typecheck` | clean (`tsc --noEmit`) |
-| `npm test` | **62 passed** (8 files) |
-| `npm run db:test` | **8 migrations applied, 84 assertions held** |
-| `npm run build` | success; app routes are dynamic (`ƒ`), including `/review` |
+| `npm test` | **75 passed** (10 files) |
+| `npm run db:test` | **9 migrations applied, 122 assertions held** |
+| `npm run build` | success; app routes are dynamic (`ƒ`), including `/focus` and `/review` |
 
 See `docs/FEATURE_STATUS.md` for a per-feature status table, `docs/ARCHITECTURE.md` for
 the design and invariants, and `docs/IMPLEMENTATION_PLAN.md` for the ordered roadmap.

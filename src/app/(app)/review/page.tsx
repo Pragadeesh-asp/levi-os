@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Badge, ConfigurationNotice, EmptyState, PageHeader, Panel, SignedOutState, StatTile } from "@/components/ui";
-import { addDays } from "@/lib/dates";
+import { addDays, toLocalTime } from "@/lib/dates";
+import { formatDuration } from "@/lib/focus";
 import {
   getAllHabits,
   getDaySummary,
+  getFocusSessionsForDay,
+  getFocusSummary,
   getHabitLogsBetween,
   getMissionsForDate,
   getSessionContext,
@@ -41,11 +44,13 @@ export default async function ReviewPage({
   const date = resolveReviewDate(params.date, today);
   const isToday = date === today;
 
-  const [summary, missions, logs, habits] = await Promise.all([
+  const [summary, missions, logs, habits, focus, focusSessions] = await Promise.all([
     getDaySummary(supabase, date, timeZone),
     getMissionsForDate(supabase, date),
     getHabitLogsBetween(supabase, date, date),
     getAllHabits(supabase),
+    getFocusSummary(supabase, date, timeZone),
+    getFocusSessionsForDay(supabase, date),
   ]);
 
   const habitNames = new Map(habits.map((habit) => [habit.id, habit.name]));
@@ -150,6 +155,23 @@ export default async function ReviewPage({
         </Panel>
         <Panel>
           <StatTile
+            label="Focus"
+            value={
+              <>
+                {formatDuration(focus.focused_seconds)}
+              </>
+            }
+            hint={
+              focus.sessions_total === 0
+                ? "No focus session was started on this day."
+                : `${focus.sessions_completed} counted · ${focus.sessions_discarded} discarded${
+                    focus.sessions_open > 0 ? " · one left running" : ""
+                  }.`
+            }
+          />
+        </Panel>
+        <Panel>
+          <StatTile
             label="Achievements"
             value={
               <>
@@ -230,12 +252,58 @@ export default async function ReviewPage({
       </Panel>
 
       <Panel>
+        <div className="row-between">
+          <h2>Focus sessions started on this day</h2>
+          <Link className="button secondary tiny" href="/focus">
+            Open Focus
+          </Link>
+        </div>
+        {focusSessions.length === 0 ? (
+          <EmptyState
+            title="No focus session"
+            description="Nothing was timed on this date. A session belongs to the local day it started on, even when it ran past midnight."
+          />
+        ) : (
+          <div className="stack" style={{ marginTop: 12 }}>
+            {focusSessions.map((row) => (
+              <article className="item" key={row.id}>
+                <div className="row-between" style={{ alignItems: "flex-start" }}>
+                  <div className="stack-sm" style={{ minWidth: 0 }}>
+                    <div className="row" style={{ gap: 8 }}>
+                      <span className="item-title">{row.intent}</span>
+                      {row.ended_at === null ? <Badge tone="active">running</Badge> : null}
+                      {row.ended_reason === "completed" ? <Badge tone="completed">counted</Badge> : null}
+                      {row.ended_reason === "discarded" ? <Badge tone="skipped">discarded</Badge> : null}
+                    </div>
+                    <p className="faint">
+                      {[
+                        `${toLocalTime(row.started_at, timeZone)}`,
+                        row.ended_at ? `until ${toLocalTime(row.ended_at, timeZone)}` : "still running",
+                        row.mission_id ? "linked to a mission" : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  </div>
+                  <span className="badge" title="Recorded duration">
+                    {formatDuration(Number(row.elapsed_seconds))}
+                  </span>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </Panel>
+
+      <Panel>
         <p className="eyebrow">How this day is counted</p>
         <p className="muted">
           XP belongs to the local day it was <em>recorded</em> in {timeZone}. Backfilling an old habit today adds
           the log to that earlier day but never rewrites the XP of a finished review — the ledger stays
           append-only. Missions, habits and achievements are counted from the rows themselves, so this page can
-          only ever show what was actually saved.
+          only ever show what was actually saved. Focus time is measured between two database timestamps and
+          contributes no XP at all: only sessions that were ended normally are counted, and a discarded one keeps
+          its record without banking its time.
         </p>
       </Panel>
     </div>

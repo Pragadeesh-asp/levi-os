@@ -28,8 +28,9 @@ describe("calendar dates", () => {
   });
 
   it("handles DST transitions in the user's zone", () => {
-    // 2026-03-08 is the US spring-forward date; 09:30 UTC is 01:30 local (still the 8th).
-    expect(toCalendarDate("2026-03-08T09:30:00.000Z", "America/New_York")).toBe("2026-03-08");
+    // On 2026-03-08 the US springs forward at 07:00 UTC: both instants are on the
+    // same local date, before and after the offset change.
+    expect(toCalendarDate("2026-03-08T06:30:00.000Z", "America/New_York")).toBe("2026-03-08");
     expect(toCalendarDate("2026-03-08T07:30:00.000Z", "America/New_York")).toBe("2026-03-08");
   });
 
@@ -38,8 +39,10 @@ describe("calendar dates", () => {
     expect(toLocalTime("2026-01-01T02:05:00.000Z", "America/Los_Angeles")).toBe("18:05");
     expect(toLocalTime("2026-01-01T02:05:00.000Z", "Asia/Kolkata")).toBe("07:35");
     expect(toLocalTime("2026-01-01T00:00:00.000Z", "UTC")).toBe("00:00");
-    // 09:30 UTC on the US spring-forward date is 04:30 EDT, not 05:30.
-    expect(toLocalTime("2026-03-08T09:30:00.000Z", "America/New_York")).toBe("04:30");
+    // The US spring-forward happens at 07:00 UTC on 2026-03-08: an hour later the
+    // same zone is suddenly four hours behind UTC instead of five.
+    expect(toLocalTime("2026-03-08T06:30:00.000Z", "America/New_York")).toBe("01:30");
+    expect(toLocalTime("2026-03-08T07:30:00.000Z", "America/New_York")).toBe("03:30");
     expect(() => toLocalTime("not an instant", "UTC")).toThrow();
   });
 
