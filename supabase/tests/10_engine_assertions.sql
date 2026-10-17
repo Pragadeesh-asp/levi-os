@@ -934,6 +934,372 @@ select public.test_assert(
   'the progress view still exposes both quests'
 );
 
+-- ===========================================================================
+-- Stage C — action history: recorded once, content-free, private, append-only
+-- ===========================================================================
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+
+-- --- Mission lifecycle -----------------------------------------------------
+select public.create_mission(current_date - 70, 'Logged for the history', 'normal') as hist_mission \gset
+select public.test_assert(
+  (select count(*) from public.action_log where subject_id = :'hist_mission'::uuid) = 1
+    and (select kind from public.action_log where subject_id = :'hist_mission'::uuid) = 'mission_created',
+  'creating a mission records exactly one creation event'
+);
+select public.test_assert(
+  (select detail->>'mission_date' from public.action_log where subject_id = :'hist_mission'::uuid) = (current_date - 70)::text
+    and not (select detail ? 'title' from public.action_log where subject_id = :'hist_mission'::uuid),
+  'the creation event carries its date and none of the mission''s content'
+);
+
+select public.set_mission_status(:'hist_mission'::uuid, 'active');
+select public.set_mission_status(:'hist_mission'::uuid, 'active');  -- idempotent: must not add an event
+select public.set_mission_status(:'hist_mission'::uuid, 'completed');
+select public.reopen_mission(:'hist_mission'::uuid);
+select public.set_mission_status(:'hist_mission'::uuid, 'skipped', 'Not today');
+select public.set_mission_status(:'hist_mission'::uuid, 'planned');
+select public.set_mission_status(:'hist_mission'::uuid, 'blocked', 'Waiting on a dependency');
+select public.set_mission_status(:'hist_mission'::uuid, 'planned');
+select public.set_mission_status(:'hist_mission'::uuid, 'skipped', 'Not this day either');
+select public.test_assert(
+  (select array_agg((detail->>'from') || '>' || (detail->>'to') order by id)
+   from public.action_log
+   where subject_id = :'hist_mission'::uuid and kind = 'mission_status_changed')
+    = array['planned>active', 'active>completed', 'completed>active', 'active>skipped',
+            'skipped>planned', 'planned>blocked', 'blocked>planned', 'planned>skipped'],
+  'every real status transition is recorded exactly once, in order, and repeats are not'
+);
+select public.test_assert(
+  (select count(*) from public.action_log where subject_id = :'hist_mission'::uuid) = 9,
+  'a mission completed, reopened, skipped, undone and blocked leaves nine events, no duplicates'
+);
+select public.test_assert(
+  (select detail ?& array['from', 'to']
+     and (select count(*) from jsonb_object_keys(detail)) = 2
+   from public.action_log
+   where subject_id = :'hist_mission'::uuid and kind = 'mission_status_changed'
+   limit 1),
+  'a status event carries the transition and nothing else'
+);
+update public.daily_missions set title = 'Logged for the history (renamed)' where id = :'hist_mission'::uuid;
+select public.test_assert(
+  (select count(*) from public.action_log where subject_id = :'hist_mission'::uuid) = 9,
+  'editing a plan is not a history event — only state transitions are'
+);
+
+select public.create_mission(current_date - 70, 'Deleted from the plan', 'low') as hist_deleted \gset
+delete from public.daily_missions where id = :'hist_deleted'::uuid;
+select public.test_assert(
+  (select count(*) from public.action_log where subject_id = :'hist_deleted'::uuid and kind = 'mission_deleted') = 1,
+  'deleting a mission leaves a deletion event behind'
+);
+select public.test_assert(
+  (select subject_label is null
+   from public.action_history
+   where subject_id = :'hist_deleted'::uuid and kind = 'mission_deleted'),
+  'a deleted subject has no name left to show — and none is invented'
+);
+
+-- --- Habit logging and archiving -------------------------------------------
+insert into public.habits (name) values ('Logged habit') returning id as hist_habit \gset
+select public.test_assert(
+  (select count(*) from public.action_log where subject_id = :'hist_habit'::uuid and kind = 'habit_created') = 1,
+  'creating a habit records a creation event without its name'
+);
+select public.log_habit(:'hist_habit'::uuid, current_date, true);
+select public.log_habit(:'hist_habit'::uuid, current_date, true);  -- no state change: no event
+select public.log_habit(:'hist_habit'::uuid, current_date, false);
+select public.log_habit(:'hist_habit'::uuid, current_date, true);
+select public.test_assert(
+  (select array_agg(kind order by id)
+   from public.action_log
+   where subject_id = :'hist_habit'::uuid and kind in ('habit_logged', 'habit_unlogged'))
+    = array['habit_logged', 'habit_unlogged', 'habit_logged'],
+  'a habit day logged, un-logged and logged again leaves three events, not five'
+);
+select public.test_assert(
+  (select bool_and(detail->>'log_date' = current_date::text)
+   from public.action_log
+   where subject_id = :'hist_habit'::uuid and kind in ('habit_logged', 'habit_unlogged')),
+  'a habit event names the day it belongs to and nothing else'
+);
+update public.habits set archived_at = now() where id = :'hist_habit'::uuid;
+update public.habits set archived_at = null where id = :'hist_habit'::uuid;
+update public.habits set archived_at = now() where id = :'hist_habit'::uuid;
+select public.test_assert(
+  (select array_agg(kind order by id)
+   from public.action_log
+   where subject_id = :'hist_habit'::uuid and kind in ('habit_archived', 'habit_restored'))
+    = array['habit_archived', 'habit_restored', 'habit_archived'],
+  'archiving and restoring a habit are recorded as they happen'
+);
+
+insert into public.habits (name) values ('Removed habit') returning id as removed_habit \gset
+delete from public.habits where id = :'removed_habit'::uuid;
+select public.test_assert(
+  (select count(*) from public.action_log where subject_id = :'removed_habit'::uuid and kind = 'habit_deleted') = 1
+    and (select count(*) from public.action_log where subject_id = :'removed_habit'::uuid) = 2,
+  'deleting a habit with no history leaves exactly its creation and deletion events'
+);
+
+-- --- Settings ---------------------------------------------------------------
+select public.set_time_zone('UTC');  -- deterministic starting point
+select count(*) as tz_before from public.action_log where kind = 'time_zone_changed' \gset
+select public.set_time_zone('Pacific/Auckland');
+select public.set_time_zone('Pacific/Auckland');  -- same zone: no event
+select public.test_assert(
+  (select count(*) from public.action_log where kind = 'time_zone_changed') = :tz_before + 1
+    and (select detail->>'to' from public.action_log where kind = 'time_zone_changed' order by id desc limit 1) = 'Pacific/Auckland',
+  'a time-zone change is recorded once, and setting the same zone again is not'
+);
+select public.set_time_zone('UTC');
+select public.test_assert(
+  (select detail->>'from' from public.action_log where kind = 'time_zone_changed' order by id desc limit 1) = 'Pacific/Auckland'
+    and (select detail->>'to' from public.action_log where kind = 'time_zone_changed' order by id desc limit 1) = 'UTC',
+  'the time-zone event names both the previous zone and the new one'
+);
+
+-- --- Privacy and least privilege --------------------------------------------
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select public.test_assert(
+  not exists (select 1 from public.action_log where user_id = '11111111-1111-1111-1111-111111111111')
+    and not exists (select 1 from public.action_log where subject_id = :'hist_mission'::uuid),
+  'another user''s action history is invisible'
+);
+select public.test_assert(
+  not exists (select 1 from public.action_history where user_id = '11111111-1111-1111-1111-111111111111'),
+  'the history view exposes only the caller''s own events'
+);
+do $$
+begin
+  begin
+    insert into public.action_log (user_id, kind, subject, subject_id)
+    values ('22222222-2222-2222-2222-222222222222', 'mission_created', 'mission', gen_random_uuid());
+    raise exception 'ASSERTION FAILED: a client could insert an action-log row';
+  exception when insufficient_privilege then
+    raise notice 'ok - clients cannot insert action-log rows directly';
+  end;
+end $$;
+do $$
+begin
+  begin
+    update public.action_log set kind = 'mission_deleted';
+    raise exception 'ASSERTION FAILED: a client could rewrite an action-log row';
+  exception when insufficient_privilege then
+    raise notice 'ok - clients cannot update action-log rows directly';
+  end;
+end $$;
+do $$
+begin
+  begin
+    delete from public.action_log;
+    raise exception 'ASSERTION FAILED: a client could delete an action-log row';
+  exception when insufficient_privilege then
+    raise notice 'ok - clients cannot delete action-log rows directly';
+  end;
+end $$;
+
+-- --- Append-only, even for the owner ----------------------------------------
+reset role;
+do $$
+begin
+  begin
+    update public.action_log set kind = 'mission_deleted';
+    raise exception 'ASSERTION FAILED: the action log was mutated';
+  exception when others then
+    if sqlerrm like 'ASSERTION FAILED%' then raise; end if;
+    raise notice 'ok - the action log is append-only (%)', sqlerrm;
+  end;
+  begin
+    delete from public.action_log;
+    raise exception 'ASSERTION FAILED: an action-log row was deleted directly';
+  exception when others then
+    if sqlerrm like 'ASSERTION FAILED%' then raise; end if;
+    raise notice 'ok - a direct delete of the action log is refused (%)', sqlerrm;
+  end;
+end $$;
+
+-- --- Deleting an account takes its private history with it ------------------
+insert into auth.users (id, email)
+values ('33333333-3333-3333-3333-333333333333', 'c@example.test')
+on conflict (id) do nothing;
+set role authenticated;
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+select public.create_mission(current_date, 'Temporary account work', 'normal') as temp_mission \gset
+insert into public.habits (name) values ('Temporary habit') returning id as temp_habit \gset
+reset role;
+select public.test_assert(
+  (select count(*) from public.action_log where user_id = '33333333-3333-3333-3333-333333333333') >= 2,
+  'the temporary account recorded its own private history'
+);
+do $$
+begin
+  delete from auth.users where id = '33333333-3333-3333-3333-333333333333';
+exception when others then
+  raise exception 'ASSERTION FAILED: deleting an account failed (%)', sqlerrm;
+end $$;
+select public.test_assert(
+  (select count(*) from public.action_log where user_id = '33333333-3333-3333-3333-333333333333') = 0,
+  'removing an account removes its private history instead of blocking the delete'
+);
+
+-- ===========================================================================
+-- Stage C — analytics: one row per local day, and every rule matches the day
+-- ===========================================================================
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+
+select public.test_assert(
+  (select row(d.missions_total, d.missions_completed, d.missions_skipped, d.missions_blocked, d.missions_open,
+              d.habits_expected, d.habits_logged, d.xp_awarded, d.xp_adjusted, d.xp_net, d.achievements_unlocked)
+   from public.day_summary(current_date - 5, 'UTC') d)
+  is not distinct from
+  (select row(r.missions_total, r.missions_completed, r.missions_skipped, r.missions_blocked, r.missions_open,
+              r.habits_expected, r.habits_logged, r.xp_awarded, r.xp_adjusted, r.xp_net, r.achievements_unlocked)
+   from public.analytics_range(current_date - 5, current_date - 5, 'UTC') r),
+  'a day summary is exactly the one-day case of the range, field for field'
+);
+select public.test_assert(
+  (select count(*) from public.analytics_range(current_date - 6, current_date, 'UTC')) = 7
+    and (select min(day) from public.analytics_range(current_date - 6, current_date, 'UTC')) = current_date - 6
+    and (select max(day) from public.analytics_range(current_date - 6, current_date, 'UTC')) = current_date,
+  'a range returns exactly one row per local day, with no gaps'
+);
+select public.test_assert(
+  (select xp_awarded = 0 and xp_adjusted = 0 and xp_net = 0 and missions_total = 0 and habits_expected = 0
+          and habits_logged = 0 and steps_completed = 0 and focus_sessions = 0 and focus_seconds = 0
+          and achievements_unlocked = 0
+   from public.analytics_range(current_date - 300, current_date - 300, 'UTC')),
+  'a range day with no records is a row of zeros, not a missing row'
+);
+
+-- XP belongs to the local day the entry was written on, in the caller's zone:
+-- 2026-01-15 23:30 UTC is already the 16th in Asia/Kolkata.
+reset role;
+insert into public.xp_ledger (user_id, source, source_id, amount, note, awarded_at)
+values ('11111111-1111-1111-1111-111111111111', 'bonus', gen_random_uuid(), 7, 'Range timezone fixture',
+        timestamptz '2026-01-15 23:30:00+00');
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select public.test_assert(
+  (select xp_net from public.analytics_range('2026-01-15', '2026-01-15', 'UTC')) = 7
+    and (select xp_net from public.analytics_range('2026-01-16', '2026-01-16', 'Asia/Kolkata')) = 7
+    and (select xp_net from public.analytics_range('2026-01-15', '2026-01-15', 'Asia/Kolkata')) = 0,
+  'an XP entry belongs to the local day it was written on, in the caller''s zone'
+);
+
+-- A discarded session is a real start and zero focused time, in the range too.
+select (select focus_sessions from public.analytics_range(current_date, current_date, 'UTC')) as range_sessions_before,
+       (select focus_completed from public.analytics_range(current_date, current_date, 'UTC')) as range_completed_before,
+       (select focus_seconds from public.analytics_range(current_date, current_date, 'UTC')) as range_seconds_before \gset
+select public.start_focus_session('Range fixture: interrupted') as range_session \gset
+select public.end_focus_session(:'range_session'::uuid, true);
+select public.test_assert(
+  (select focus_sessions from public.analytics_range(current_date, current_date, 'UTC')) = :range_sessions_before + 1
+    and (select focus_completed from public.analytics_range(current_date, current_date, 'UTC')) = :range_completed_before
+    and (select focus_seconds from public.analytics_range(current_date, current_date, 'UTC')) = :range_seconds_before,
+  'a discarded session is counted as started and contributes no focus time'
+);
+
+-- A reopened mission is not completed work, however often it was completed.
+select public.create_mission(current_date - 71, 'Reopened again', 'normal') as reopened_mission \gset
+select public.set_mission_status(:'reopened_mission'::uuid, 'completed');
+select public.reopen_mission(:'reopened_mission'::uuid);
+select public.set_mission_status(:'reopened_mission'::uuid, 'completed');
+select public.reopen_mission(:'reopened_mission'::uuid);
+select public.test_assert(
+  (select missions_total from public.analytics_range(current_date - 71, current_date - 71, 'UTC')) = 1
+    and (select missions_completed from public.analytics_range(current_date - 71, current_date - 71, 'UTC')) = 0,
+  'a mission that was reopened is not counted as completed, no matter how often it was completed'
+);
+
+do $$
+begin
+  begin
+    perform public.analytics_range(null::date, current_date, 'UTC');
+    raise exception 'ASSERTION FAILED: a range with no start was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERTION FAILED%' then raise; end if;
+    raise notice 'ok - a range needs two calendar dates (%)', sqlerrm;
+  end;
+  begin
+    perform public.analytics_range(current_date, current_date - 1, 'UTC');
+    raise exception 'ASSERTION FAILED: a reversed range was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERTION FAILED%' then raise; end if;
+    raise notice 'ok - a reversed range is rejected (%)', sqlerrm;
+  end;
+  begin
+    perform public.analytics_range(current_date - 2000, current_date, 'UTC');
+    raise exception 'ASSERTION FAILED: a range longer than a year was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERTION FAILED%' then raise; end if;
+    raise notice 'ok - a range longer than a year is rejected (%)', sqlerrm;
+  end;
+  begin
+    perform public.analytics_range(current_date, current_date, 'Mars/Olympus_Mons');
+    raise exception 'ASSERTION FAILED: a range accepted an unrecognized time zone';
+  exception when others then
+    if sqlerrm like 'ASSERTION FAILED%' then raise; end if;
+    raise notice 'ok - a range rejects an unrecognized time zone';
+  end;
+end $$;
+
+select public.test_assert(
+  (select count(*) from public.xp_by_source where user_id = '11111111-1111-1111-1111-111111111111')
+    = (select count(distinct source) from public.xp_ledger where user_id = '11111111-1111-1111-1111-111111111111')
+    and not exists (
+      select 1
+      from public.xp_by_source v
+      join (
+        select x.source,
+               coalesce(sum(x.amount) filter (where x.amount > 0), 0) as awarded,
+               coalesce(sum(x.amount) filter (where x.amount < 0), 0) as adjusted,
+               coalesce(sum(x.amount), 0) as net,
+               count(*) as entries
+        from public.xp_ledger x
+        where x.user_id = '11111111-1111-1111-1111-111111111111'
+        group by x.source
+      ) l on l.source = v.source
+      where v.user_id = '11111111-1111-1111-1111-111111111111'
+        and (v.awarded is distinct from l.awarded
+          or v.adjusted is distinct from l.adjusted
+          or v.net is distinct from l.net
+          or v.entries is distinct from l.entries)
+    ),
+  'xp_by_source reports exactly the ledger''s own sums per source'
+);
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select public.test_assert(
+  (select count(*) from public.xp_by_source) = 0,
+  'another user sees none of the XP-by-source rows'
+);
+
+-- The local day of an event is derived at read time from the caller's zone,
+-- never stored with the event: 2026-03-07 23:30 UTC is the 8th in Asia/Kolkata.
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+reset role;
+insert into public.action_log (user_id, kind, subject, subject_id, occurred_at, detail)
+values ('11111111-1111-1111-1111-111111111111', 'time_zone_changed', 'profile',
+        '11111111-1111-1111-1111-111111111111', timestamptz '2026-03-07 23:30:00+00',
+        '{"from": "UTC", "to": "Asia/Kolkata"}'::jsonb)
+returning id as tz_fixture \gset
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select public.set_time_zone('Asia/Kolkata');
+select public.test_assert(
+  (select occurred_on from public.action_history where id = :'tz_fixture') = '2026-03-08',
+  'the history dates an instant on the local day of the caller''s own zone'
+);
+select public.set_time_zone('UTC');
+select public.test_assert(
+  (select occurred_on from public.action_history where id = :'tz_fixture') = '2026-03-07',
+  'the local day is derived at read time, not stored with the event'
+);
+
+reset role;
+
 drop function public.test_assert(boolean, text);
 \echo '========================================================================='
 \echo ' ALL DATABASE TESTS PASSED'

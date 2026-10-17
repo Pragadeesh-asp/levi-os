@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Badge, ConfigurationNotice, EmptyState, PageHeader, Panel, SignedOutState, StatTile } from "@/components/ui";
+import { describeAction, rate, sumDays, trendBars } from "@/lib/analytics";
 import { addDays, toLocalTime } from "@/lib/dates";
 import { formatDuration } from "@/lib/focus";
 import {
   getAllHabits,
+  getActionsForDay,
+  getAnalyticsRange,
   getDaySummary,
   getFocusSessionsForDay,
   getFocusSummary,
@@ -44,13 +47,15 @@ export default async function ReviewPage({
   const date = resolveReviewDate(params.date, today);
   const isToday = date === today;
 
-  const [summary, missions, logs, habits, focus, focusSessions] = await Promise.all([
+  const [summary, missions, logs, habits, focus, focusSessions, range, actions] = await Promise.all([
     getDaySummary(supabase, date, timeZone),
     getMissionsForDate(supabase, date),
     getHabitLogsBetween(supabase, date, date),
     getAllHabits(supabase),
     getFocusSummary(supabase, date, timeZone),
     getFocusSessionsForDay(supabase, date),
+    getAnalyticsRange(supabase, addDays(date, -13), date, timeZone),
+    getActionsForDay(supabase, date),
   ]);
 
   const habitNames = new Map(habits.map((habit) => [habit.id, habit.name]));
@@ -65,6 +70,13 @@ export default async function ReviewPage({
   );
   const habitRate =
     summary.habits_expected > 0 ? Math.round((summary.habits_logged / summary.habits_expected) * 100) : 0;
+
+  const weekDays = range.filter((row) => row.day >= addDays(date, -6));
+  const week = sumDays(weekDays);
+  const previous = sumDays(range.filter((row) => row.day < addDays(date, -6)));
+  const weekMissionRate = rate(week.missions_completed, week.missions_total);
+  const weekHabitRate = rate(week.habits_logged, week.habits_expected);
+  const weekBars = trendBars(weekDays, (row) => row.xp_net);
 
   return (
     <div className="stack" style={{ gap: 18 }}>
@@ -184,6 +196,103 @@ export default async function ReviewPage({
                 : "Unlocked by work recorded on this day."
             }
           />
+        </Panel>
+      </div>
+
+      <div className="grid-wide">
+        <Panel>
+          <div className="row-between" style={{ marginBottom: 12 }}>
+            <div>
+              <p className="eyebrow">Trend</p>
+              <h2 style={{ marginTop: 4 }}>Seven days ending {date}</h2>
+            </div>
+            <span className="faint">local days in {timeZone}</span>
+          </div>
+          {range.length === 0 ? (
+            <EmptyState
+              title="No trend available"
+              description="The database returned no days for this window, so no chart is drawn."
+            />
+          ) : (
+            <div className="stack">
+              <ol className="trend" aria-label={`Daily XP net for the seven days ending ${date}`}>
+                {weekBars.map((bar) => (
+                  <li
+                    key={bar.day}
+                    className={bar.negative ? "negative" : bar.value > 0 ? "positive" : "zero"}
+                    style={{ height: `${bar.percent}%` }}
+                    title={`${bar.day}: ${signedXp(bar.value)} XP net`}
+                  >
+                    <span className="sr-only">
+                      {bar.day}: {signedXp(bar.value)} XP net
+                    </span>
+                  </li>
+                ))}
+              </ol>
+              <div className="stack-sm">
+                <div className="row-between">
+                  <span className="muted">XP net</span>
+                  <span className="numeric">{signedXp(week.xp_net)}</span>
+                </div>
+                <div className="row-between">
+                  <span className="muted">Missions completed</span>
+                  <span className="numeric">
+                    {week.missions_completed} / {week.missions_total}
+                    {weekMissionRate === null ? "" : ` · ${weekMissionRate}%`}
+                  </span>
+                </div>
+                <div className="row-between">
+                  <span className="muted">Habit-days logged</span>
+                  <span className="numeric">
+                    {week.habits_logged} / {week.habits_expected}
+                    {weekHabitRate === null ? "" : ` · ${weekHabitRate}%`}
+                  </span>
+                </div>
+                <div className="row-between">
+                  <span className="muted">Focus time</span>
+                  <span className="numeric">{formatDuration(week.focus_seconds)}</span>
+                </div>
+                <div className="row-between">
+                  <span className="muted">Achievements unlocked</span>
+                  <span className="numeric">{week.achievements_unlocked}</span>
+                </div>
+              </div>
+              <p className="faint">
+                Previous seven days: {signedXp(previous.xp_net)} XP net · {previous.missions_completed} missions
+                completed · {formatDuration(previous.focus_seconds)} focused. Bars show net XP; a red mark is a day
+                whose corrections outweighed its awards.
+              </p>
+            </div>
+          )}
+        </Panel>
+
+        <Panel>
+          <div className="row-between" style={{ marginBottom: 12 }}>
+            <div>
+              <p className="eyebrow">History</p>
+              <h2 style={{ marginTop: 4 }}>Recorded on this day</h2>
+            </div>
+            <span className="faint">
+              {actions.length} event{actions.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          {actions.length === 0 ? (
+            <EmptyState
+              title="Nothing recorded in the action history"
+              description="The history starts with the release that introduced it. Days before that were never stored, and this page does not claim to reconstruct them."
+            />
+          ) : (
+            <div className="items">
+              {actions.map((action) => (
+                <article className="item" key={action.id}>
+                  <div className="row-between">
+                    <span>{describeAction(action.kind, action.detail, action.subject_label)}</span>
+                    <span className="faint numeric">{toLocalTime(action.occurred_at, timeZone)}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
         </Panel>
       </div>
 

@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Badge, ConfigurationNotice, EmptyState, PageHeader, Panel, ProgressBar, SignedOutState, StatTile } from "@/components/ui";
-import { toCalendarDate } from "@/lib/dates";
+import { describeAction, rate, sumDays, trendBars, XP_SOURCE_LABELS } from "@/lib/analytics";
+import { addDays, toCalendarDate, toLocalTime } from "@/lib/dates";
+import { formatDuration } from "@/lib/focus";
 import { isScheduledOn, scheduleFromWeekdays } from "@/lib/habits";
 import {
   countByStatus,
   getAchievements,
+  getAnalyticsRange,
   getHabitLogsBetween,
   getHabitSummaries,
   getLevelHistory,
@@ -13,22 +16,15 @@ import {
   getOverdueMissions,
   getPlayerStats,
   getQuestOverview,
+  getRecentActions,
   getSessionContext,
+  getXpBySource,
   isSupabaseConfigured,
   type PlayerStats,
 } from "@/lib/queries";
 import { formatXp } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Command Center · LEVI OS" };
-
-const XP_SOURCE_LABELS: Record<string, string> = {
-  quest_completion: "Quest completed",
-  daily_mission: "Daily mission",
-  habit: "Habit logged",
-  milestone: "Milestone",
-  bonus: "Bonus",
-  achievement: "Achievement",
-};
 
 const EMPTY_STATS: PlayerStats = {
   user_id: "",
@@ -61,16 +57,21 @@ export default async function DashboardPage() {
   if (!session) return <SignedOutState module="Command center" />;
   const { supabase, today, timeZone, displayName } = session;
 
-  const [statsRow, missions, overdue, habits, todayLogs, quests, history, achievements] = await Promise.all([
-    getPlayerStats(supabase),
-    getMissionsForDate(supabase, today),
-    getOverdueMissions(supabase, today),
-    getHabitSummaries(supabase, today),
-    getHabitLogsBetween(supabase, today, today),
-    getQuestOverview(supabase),
-    getLevelHistory(supabase, 6),
-    getAchievements(supabase),
-  ]);
+  const momentumFrom = addDays(today, -13);
+  const [statsRow, missions, overdue, habits, todayLogs, quests, history, achievements, range, xpBySource, actions] =
+    await Promise.all([
+      getPlayerStats(supabase),
+      getMissionsForDate(supabase, today),
+      getOverdueMissions(supabase, today),
+      getHabitSummaries(supabase, today),
+      getHabitLogsBetween(supabase, today, today),
+      getQuestOverview(supabase),
+      getLevelHistory(supabase, 6),
+      getAchievements(supabase),
+      getAnalyticsRange(supabase, momentumFrom, today, timeZone),
+      getXpBySource(supabase),
+      getRecentActions(supabase, 8),
+    ]);
 
   const stats = statsRow ?? EMPTY_STATS;
   const counts = countByStatus(missions);
@@ -87,6 +88,20 @@ export default async function DashboardPage() {
   const activeQuests = quests.filter((quest) => quest.status !== "done");
   const unlocked = achievements.filter((achievement) => achievement.unlockedAt !== null);
   const levelProgressPercent = percent(stats.xp_into_level, stats.xp_for_next_level);
+
+  const momentumBars = trendBars(range, (day) => day.xp_net);
+  const week = sumDays(range.filter((day) => day.day >= addDays(today, -6)));
+  const weekMissionRate = rate(week.missions_completed, week.missions_total);
+  const weekHabitRate = rate(week.habits_logged, week.habits_expected);
+  const weekFocusRate = rate(week.focus_completed, week.focus_sessions);
+  const hasMomentum = range.some(
+    (day) =>
+      day.xp_net !== 0 ||
+      day.missions_total > 0 ||
+      day.focus_sessions > 0 ||
+      day.habits_logged > 0 ||
+      day.achievements_unlocked > 0,
+  );
 
   return (
     <div className="stack" style={{ gap: 18 }}>
@@ -177,6 +192,141 @@ export default async function DashboardPage() {
             progress={percent(stats.quests_completed, stats.quests_completed + activeQuests.filter((q) => q.kind === "main").length)}
             hint={`${activeQuests.length} active · ${stats.subquests_completed} subquests closed · ${stats.steps_completed} steps with evidence`}
           />
+        </Panel>
+      </div>
+
+      <div className="grid-wide">
+        <Panel>
+          <div className="row-between" style={{ marginBottom: 12 }}>
+            <div>
+              <p className="eyebrow">Momentum</p>
+              <h2 style={{ marginTop: 4 }}>The last 14 days</h2>
+            </div>
+            <span className="faint">local days in {timeZone}</span>
+          </div>
+
+          {!hasMomentum ? (
+            <EmptyState
+              title="Nothing recorded in the last 14 days"
+              description="Complete a mission, log a habit or close a quest and the trend starts here. A day with no records is shown as zero — never estimated."
+            />
+          ) : (
+            <div className="stack">
+              <ol className="trend" aria-label={`Daily XP net for the 14 days ending ${today}`}>
+                {momentumBars.map((bar) => (
+                  <li
+                    key={bar.day}
+                    className={bar.negative ? "negative" : bar.value > 0 ? "positive" : "zero"}
+                    style={{ height: `${bar.percent}%` }}
+                    title={`${bar.day}: ${signedXp(bar.value)} XP net`}
+                  >
+                    <span className="sr-only">
+                      {bar.day}: {signedXp(bar.value)} XP net
+                    </span>
+                  </li>
+                ))}
+              </ol>
+              <div className="row-between">
+                <span className="faint">
+                  {range[0]?.day} → {range[range.length - 1]?.day}
+                </span>
+                <span className="faint">red = corrections outweighed awards</span>
+              </div>
+
+              <div className="grid">
+                <div className="stack-sm">
+                  <span className="stat-label">XP net · last 7 days</span>
+                  <span className="stat-value">
+                    {signedXp(week.xp_net)} <small>XP</small>
+                  </span>
+                  <span className="faint">
+                    {formatXp(week.xp_awarded)} awarded · {signedXp(week.xp_adjusted)} adjusted
+                  </span>
+                </div>
+                <div className="stack-sm">
+                  <span className="stat-label">Missions · last 7 days</span>
+                  <span className="stat-value">
+                    {week.missions_completed} <small>/ {week.missions_total} completed</small>
+                  </span>
+                  <span className="faint">
+                    {weekMissionRate === null
+                      ? "Nothing was planned."
+                      : `${weekMissionRate}% of planned work completed`}
+                  </span>
+                </div>
+                <div className="stack-sm">
+                  <span className="stat-label">Focus · last 7 days</span>
+                  <span className="stat-value">{formatDuration(week.focus_seconds)}</span>
+                  <span className="faint">
+                    {weekFocusRate === null
+                      ? "No session was started."
+                      : `${week.focus_completed} of ${week.focus_sessions} sessions counted · ${weekFocusRate}%`}
+                  </span>
+                </div>
+                <div className="stack-sm">
+                  <span className="stat-label">Habits · last 7 days</span>
+                  <span className="stat-value">
+                    {week.habits_logged} <small>/ {week.habits_expected} logged</small>
+                  </span>
+                  <span className="faint">
+                    {weekHabitRate === null
+                      ? "Nothing was scheduled."
+                      : `${weekHabitRate}% of scheduled habit-days`}
+                  </span>
+                </div>
+                <div className="stack-sm">
+                  <span className="stat-label">Achievements · last 7 days</span>
+                  <span className="stat-value">{week.achievements_unlocked}</span>
+                  <span className="faint">
+                    {week.achievements_unlocked === 0 ? "None unlocked." : "Unlocked by this week's work."}
+                  </span>
+                </div>
+              </div>
+
+              <p className="faint">
+                Net XP means awards plus corrections. Reopened missions are not counted as completed, and discarded
+                focus sessions contribute no time.
+              </p>
+            </div>
+          )}
+        </Panel>
+
+        <Panel>
+          <div className="stack-sm">
+            <p className="eyebrow">Sources</p>
+            <h2>Where XP comes from</h2>
+            {xpBySource.length === 0 ? (
+              <p className="muted">
+                No XP has been written to the ledger yet. Missions, habits and quest steps each report under their
+                own source.
+              </p>
+            ) : (
+              <>
+                <p className="muted">
+                  Lifetime net by source. An adjustment stays under the source of the award it corrected, so a
+                  reopened mission cannot invent a new category.
+                </p>
+                <div className="items">
+                  {xpBySource.map((row) => (
+                    <article className="item" key={row.source}>
+                      <div className="row-between">
+                        <div className="stack-sm">
+                          <span className="item-title">{XP_SOURCE_LABELS[row.source]}</span>
+                          <span className="faint">
+                            {formatXp(row.awarded)} awarded
+                            {row.adjusted !== 0 ? ` · ${signedXp(row.adjusted)} corrected` : ""}
+                          </span>
+                        </div>
+                        <span className="badge" title={`${row.entries} ledger entries`}>
+                          {signedXp(row.net)} XP
+                        </span>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </Panel>
       </div>
 
@@ -326,6 +476,34 @@ export default async function DashboardPage() {
                         </div>
                         <span className="badge" title="XP change">
                           {signedXp(event.amount)} XP
+                        </span>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Panel>
+
+          <Panel>
+            <div className="stack-sm">
+              <p className="eyebrow">History</p>
+              <h2>Recent activity</h2>
+              {actions.length === 0 ? (
+                <p className="muted">
+                  Nothing recorded yet. The action history starts with this release — earlier changes were never
+                  stored, and this page does not reconstruct them.
+                </p>
+              ) : (
+                <div className="items">
+                  {actions.map((action) => (
+                    <article className="item" key={action.id}>
+                      <div className="stack-sm">
+                        <span className="item-title">
+                          {describeAction(action.kind, action.detail, action.subject_label)}
+                        </span>
+                        <span className="faint numeric">
+                          {action.occurred_on} · {toLocalTime(action.occurred_at, timeZone)}
                         </span>
                       </div>
                     </article>

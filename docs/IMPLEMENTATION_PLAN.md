@@ -6,8 +6,8 @@ An ordered, executable roadmap for finishing LEVI OS — **not** replacing it.
 (something real exists, something real is missing) · ⏭ not started · 🔒 needs the project
 owner (credentials, cost, or a production write).
 
-_Last verified: 2026-10-18 · `npm run lint` · `npm run typecheck` · `npm test` (75 passed)
-· `npm run db:test` (9 migrations, 122 assertions) · `npm run build`._
+_Last verified: 2026-10-18 · `npm run lint` · `npm run typecheck` · `npm test` (89 passed)
+· `npm run db:test` (10 migrations, 160 assertions) · `npm run build`._
 
 ---
 
@@ -26,7 +26,7 @@ _Last verified: 2026-10-18 · `npm run lint` · `npm run typecheck` · `npm test
 | 9 | Knowledge library | ⏭ | Nothing stored. |
 | 10 | Scripture and prayer journal | ⏭ | Only as a habit schedule ("every Mon/Wed/Fri"); no entries. |
 | 11 | Read-only AI advisor | ⏭ | No code, no key. Constraints are already decided (Part 2.11). |
-| 12 | Advanced analytics and personalization | 🟡 | `player_stats`, `level_history`, `day_summary`, streaks; no trends. |
+| 12 | Advanced analytics and personalization | ✅ | 14-day trend, 7-day totals, XP by source, append-only action history. |
 
 ---
 
@@ -34,13 +34,14 @@ _Last verified: 2026-10-18 · `npm run lint` · `npm run typecheck` · `npm test
 
 | Phase | Outcome | Evidence |
 | --- | --- | --- |
-| 0 — Verification foundation ✅ | every migration applied to an empty Postgres, then asserted; CI runs it | `scripts/db-verify.mjs`, `npm run db:test` → **9 migrations / 122 assertions**, `.github/workflows/ci.yml` |
-| 1 — Canonical arithmetic ✅ | one formula per concern, in TS **and** SQL: levels, XP awards, streaks/consistency, calendar dates, money, input cleaning | `src/lib/{progression,habits,finance,dates,input-validation}.ts` + `src/lib/*.test.ts` (75 tests) |
+| 0 — Verification foundation ✅ | every migration applied to an empty Postgres, then asserted; CI runs it | `scripts/db-verify.mjs`, `npm run db:test` → **10 migrations / 160 assertions**, `.github/workflows/ci.yml` |
+| 1 — Canonical arithmetic ✅ | one formula per concern, in TS **and** SQL: levels, XP awards, streaks/consistency, calendar dates, money, input cleaning, analytics totals | `src/lib/{progression,habits,finance,dates,input-validation,analytics}.ts` + `src/lib/*.test.ts` (89 tests) |
 | 2 — Quest engine ✅ | main quests → subquests → evidenced steps; derived progress; the runtime ambiguity is fixed | `complete_quest_step`, `quest_progress`, assertions |
 | 3 — Core daily loop ✅ | missions (planned → active → completed/skipped/blocked, reasons required) and habits (scheduled weekdays, per-day logs, streaks, archive) | `set_mission_status`, `log_habit`, `habit_summary`, assertions |
 | 4 — Real-data Command Center ✅ | every screen reads RLS-scoped records (or shows an empty state); no mock data | `/dashboard`, `/missions`, `/habits`, `/quests`, `/settings`, `/review` all build as `ƒ` |
 | 5 — Daily loop completed ✅ | undo/redo, historical day review, backfill guard | Part 2.2, 2.3 below; 15 new assertions |
 | 6 — Focus + ordering ✅ | measured focus sessions with no XP; one strict order per day, owned by an RPC | Part 2.4, 2.5 below; 38 new assertions |
+| 7 — Analytics + action history ✅ | one local-day range read model; append-only, content-free audit events written by triggers | Part 2.12 below; 38 new assertions |
 
 **Phase 5 detail (delivered in this stage):**
 
@@ -71,6 +72,28 @@ _Last verified: 2026-10-18 · `npm run lint` · `npm run typecheck` · `npm test
   priority: priority is a badge, ↑/↓ move a mission, and the Command Center's "next up" is
   the top of the same saved order.
 
+**Phase 7 detail (delivered in this stage):**
+
+- **Action history, not a second ledger.** `action_log` records only transitions nothing
+  else stores: mission created / status-changed / deleted, habit logged / un-logged /
+  archived / restored / deleted, and time-zone changes. Focus sessions, quest steps,
+  achievements and XP already have authoritative tables, so they are read from there and
+  never copied. Events carry a subject pointer and structured state only — no titles,
+  notes, outcomes or evidence.
+- **Written where the change happens.** Security-definer triggers on the four source tables
+  write the rows, so a future write path cannot forget; idempotent RPC calls produce no
+  duplicate event. Clients hold SELECT only, and an immutability trigger refuses direct
+  mutation. Account deletion cascades the private history away safely.
+- **One range definition.** `analytics_range(from, to, tz)` returns one row per local day,
+  including empty days. `day_summary` is its single-day case (all 122 earlier assertions
+  still prove it), and the review's seven-day context comes from the same function.
+  `xp_by_source` reports awards, adjustments and net per source.
+- **Screens, not dashboards-for-their-own-sake.** The Command Center adds a 14-day net-XP
+  trend with 7-day totals, the XP-source split and recent activity; the day review adds the
+  seven days ending on that date (with the previous seven for comparison) and the events
+  recorded that day. Both use existing panels and CSS — no charting dependency, and the
+  only arithmetic added is `src/lib/analytics.ts`, unit-tested.
+
 ---
 
 ## Part 2 — The remaining work, area by area
@@ -91,9 +114,11 @@ _Last verified: 2026-10-18 · `npm run lint` · `npm run typecheck` · `npm test
 - **Exists:** undo (skip/block → planned), reopen (complete → active, XP withdrawn),
   `day_summary` + `/review`, date navigation, XP-attribution honesty ("XP belongs to the day
   it was recorded").
-- **Missing (deliberate):** an *action history* ("undo my last three edits") and a
-  multi-day weekly review. The ledger already answers "what happened when"; a multi-step
-  undo would need a new append-only `action_log` and is scheduled as Stage C+.
+- **Since Stage C:** the append-only `action_log` now records the mission transitions
+  (create, skip, block, undo, reopen, delete) that previously left no trace, and `/review`
+  shows the seven days ending on the reviewed date. A *weekly review* with notes and
+  next-week planning, and multi-step undo, are still Stage D work — the log makes them
+  possible, but neither is built.
 - **Evidence:** assertions _"a backfilled day reports the log…"_, _"the XP net of a day
   always equals its awards plus its adjustments"_, _"another user's day summary is empty"_;
   `src/lib/review.test.ts`.
@@ -205,15 +230,18 @@ _Last verified: 2026-10-18 · `npm run lint` · `npm run typecheck` · `npm test
   *draft* (no side effects), then add the provider call behind an env var. Without the key
   the feature degrades to an empty state, exactly like `ConfigurationNotice`.
 
-### 2.12 Advanced analytics and personalization 🟡
+### 2.12 Advanced analytics and personalization ✅
 
-- **Exists:** `player_stats` (counts, level, XP into level), `level_history`, `day_summary`
-  (per-day XP/missions/habits/achievements), streaks and 30-day consistency per habit.
-- **Missing (Stage C):** trends over time — XP per local day for the last N days, completion
-  rate per day, habit heat-map — and personalisation (which missions you actually finish,
-  when you skip). Build them as SQL read models next to `day_summary` and render with the
-  existing CSS (bar/sparkline), so no charting dependency and no client-side arithmetic is
-  introduced.
+- **Delivered:** `analytics_range(from, to, tz)` — one row per local day with XP awarded /
+  adjusted / net, missions by status, habits expected / logged, quest steps, focus sessions
+  and completed focus seconds, and achievements. `day_summary` is now its single-day case.
+  `xp_by_source` groups the ledger by source. The Command Center shows a 14-day net-XP
+  trend, 7-day totals, the source split and recent activity; the day review shows the seven
+  days ending on that date and the events recorded on it.
+- **Not built (deliberate):** a per-mission "what you finish when" personalisation model and
+  a habit heat-map. Both are derivable from the same rows later; neither is needed to answer
+  "how did the last N days go?", and adding them now would crowd the two screens. No
+  charting dependency was introduced — the bars are existing CSS.
 
 ---
 
@@ -226,8 +254,8 @@ testable from the repository, and leaves the application working.
 | --- | --- | --- | --- |
 | **A** ✅ **done** | 2.2 undo/redo + day review, 2.3 backfill guard | additive migration; no existing table altered destructively; no new dependency | `db:test` 8 / 84, `npm test` 62, build |
 | **B** ✅ **done** | 2.4 focus sessions, 2.5 mission ordering | new table + RPCs; `position` moved out of the client grant so ordering is RPC-only | `db:test` 9 / 122, `npm test` 75, build |
-| **C** *(next)* | 2.12 analytics foundation, 2.2 action history | read-only views/RPCs next to `day_summary`; no schema churn | assertions that each trend equals the sum of its rows |
-| **D** | 2.7 journal + weekly review, 2.10 scripture/prayer as journal kinds | one new table, RLS, no XP path | assertions for privacy and "review cites ledger totals" |
+| **C** ✅ **done** | 2.12 analytics, 2.2 action history | one new append-only table + triggers, plus read-only RPCs/views; no existing row rewritten | `db:test` 10 / 160, `npm test` 89, build |
+| **D** *(next)* | 2.7 journal + weekly review, 2.10 scripture/prayer as journal kinds | one new table, RLS, no XP path | assertions for privacy and "review cites ledger totals" |
 | **E** | 2.8 career/learning, 2.9 knowledge library | new tables that link to existing quests; no new XP source | assertions for ownership + link integrity |
 | **F** 🔒 | 2.6 finance, 2.11 AI advisor | finance needs the owner's real data to be useful; the advisor needs a key | finance: balance-view assertions; advisor: no-write assertion |
 | **G** 🔒 | 2.1 remote integration + production smoke test | **only** step that touches the live project and cannot be undone by a `git checkout` | Part 4 checklist, run against the project |
@@ -236,7 +264,7 @@ testable from the repository, and leaves the application working.
 *safety*: it is the only step that writes to the live database, it needs credentials this
 session does not have, and it cannot be re-run blindly. Every extra migration also increases
 what has to be applied in one go — so the honest sequence is: finish the schema the product
-needs **or** apply the current, already-asserted 9 migrations deliberately and then keep
+needs **or** apply the current, already-asserted 10 migrations deliberately and then keep
 shipping additively. Both are safe; the unsafe version is pushing migrations while nobody is
 watching the production data. Part 4 makes either choice verifiable.
 
@@ -249,8 +277,9 @@ The repository cannot prove the remote state. This is the smallest checklist tha
 **Before**
 
 1. `supabase link --project-ref <ref>` (already linked per `supabase/.temp/`).
-2. `supabase db push --dry-run` — inspect that exactly the 9 migrations in
-   `supabase/migrations/` will be applied, in timestamp order.
+2. `supabase db push --dry-run` — inspect that exactly the 10 migrations in
+   `supabase/migrations/` will be applied, in timestamp order (the newest adds `action_log`,
+   `action_history`, `analytics_range` and `xp_by_source`).
 3. Back up: `pg_dump "$DATABASE_URL" > levi-backup-<date>.sql` (schema + data).
 4. Confirm the two public env vars are set in the deployment
    (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`).
@@ -275,16 +304,22 @@ The repository cannot prove the remote state. This is the smallest checklist tha
     **Discard** → it stays listed, marked discarded, and "Focused today" does not move.
 13. `/review` — the focus tile and the day's sessions appear; a discarded session is listed
     but contributes no time.
-14. `/quests` — complete a step (evidence required), then a whole subquest → `+250 XP`.
-15. `/settings` — change the time zone; an invalid zone is rejected.
-16. Sign out → `/auth/signout` is POST-only and redirects to `/login`.
-17. Second account: it must see **none** of the first account's missions, habits, focus
-    sessions, XP or `/review` data, and a crafted reorder of the first account's missions
-    must be rejected.
+14. `/dashboard` — the momentum panel shows a 14-day bar row and the 7-day totals for the
+    actions you just performed; the XP-source rows add up to lifetime XP; "Recent activity"
+    lists the mission and habit transitions with their local times.
+15. `/review` — the "Seven days ending" panel matches the days' data; "Recorded on this day"
+    lists today's mission/habit events. Open a date before the migration was applied: the
+    empty state must say the history is not retroactive, not fake old events.
+16. `/quests` — complete a step (evidence required), then a whole subquest → `+250 XP`.
+17. `/settings` — change the time zone; an invalid zone is rejected.
+18. Sign out → `/auth/signout` is POST-only and redirects to `/login`.
+19. Second account: it must see **none** of the first account's missions, habits, focus
+    sessions, XP, activity history or analytics, and a crafted reorder of the first
+    account's missions must be rejected.
 
 **After**
 
-18. Record the output of steps 6–17 in this file (or `docs/FEATURE_STATUS.md`) with a date.
+20. Record the output of steps 6–19 in this file (or `docs/FEATURE_STATUS.md`) with a date.
     Anything not executed stays ⏭ — never marked verified from inspection.
 
 ---

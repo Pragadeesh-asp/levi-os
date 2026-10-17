@@ -167,19 +167,20 @@ column entirely and sorted by priority, so the stored order was dead data.
 | **No service-role key** | Only the publishable key is used; all privileged writes go through `security definer` RPCs. |
 | **Auth provider** | Login is magic-link (`signInWithOtp`); delivery depends on the Supabase project's email configuration, which cannot be verified from the repository. |
 | **Finance module** | `src/lib/finance.ts` is complete and tested but **not yet wired** to any table, action or screen. |
+| **Action history start point** | `action_log` (Stage C) records events only from the migration that introduced it onward. Earlier changes were never stored and are deliberately not reconstructed. |
 
 ## 6. Baseline verification (real output)
 
-_Stage B (focus sessions, persistent ordering) re-ran every script. Numbers below are the
+_Stage C (action history and analytics) re-ran every script. Numbers below are the
 current, real output._
 
 | Command | Result |
 | --- | --- |
 | `npm run lint` | 0 errors, 0 warnings |
 | `npm run typecheck` | clean (`tsc --noEmit`) |
-| `npm test` | **75 passed** (10 files) |
-| `npm run db:test` | **9 migrations applied, 122 assertions held** |
-| `npm run build` | success; app routes are dynamic (`ƒ`), including `/focus` and `/review` |
+| `npm test` | **89 passed** (11 files) |
+| `npm run db:test` | **10 migrations applied, 160 assertions held** |
+| `npm run build` | success; app routes are dynamic (`ƒ`), including `/focus`, `/review` and the analytics panels |
 
 See `docs/FEATURE_STATUS.md` for a per-feature status table, `docs/ARCHITECTURE.md` for
 the design and invariants, and `docs/IMPLEMENTATION_PLAN.md` for the ordered roadmap.

@@ -17,7 +17,8 @@ from it, and nothing is ever hard-coded or sampled.
 
 - **Auth** — passwordless magic link, session-guarded app shell.
 - **Command Center** (`/dashboard`) — level, XP progress, today's missions, habits due,
-  active quests, recent XP and achievements, all from real records.
+  active quests, recent XP and achievements, plus a 14-day momentum trend, XP by source and
+  recent activity, all from real records.
 - **Missions** (`/missions`) — plan any calendar day; complete, skip or block with a
   reason; reorder the day with ↑ / ↓ and the order is saved; carried-over work is surfaced.
 - **Habits** (`/habits`) — weekday schedules, per-day logging, real streaks and 30-day
@@ -27,7 +28,8 @@ from it, and nothing is ever hard-coded or sampled.
   at most one runs at a time, a session left running can be discarded, and no XP is awarded
   for time alone.
 - **Day review** (`/review?date=`) — a read-only record of one finished day: XP recorded,
-  missions by status, habits logged vs expected, focus sessions, achievements unlocked.
+  missions by status, habits logged vs expected, focus sessions, achievements unlocked, the
+  seven days ending on that date, and the events the action history recorded that day.
 - **Settings** (`/settings`) — display name and a server-validated IANA time zone.
 
 ## Local setup
@@ -52,7 +54,7 @@ Run these before trusting any change; they are exactly what CI runs.
 npm run lint        # ESLint
 npm run typecheck   # tsc --noEmit
 npm test            # Vitest unit tests (pure domain engines)
-npm run db:test     # applies ALL migrations to a throwaway Postgres + 122 SQL assertions
+npm run db:test     # applies ALL migrations to a throwaway Postgres + 160 SQL assertions
 npm run build       # production build; app routes must be dynamic (ƒ)
 ```
 
@@ -67,7 +69,7 @@ src/app/(app)/        signed-in shell + dashboard, missions, habits, quests, foc
 src/app/(auth|login)  auth callback, sign out, magic-link login
 src/components/       UI building blocks (ui.tsx, ActionForm, MissionCard, HabitCard, nav)
 src/lib/              pure engines (progression, habits, finance, dates, focus, ordering,
-                      validation) + data access (queries, auth) and action results
+                      analytics, validation) + data access (queries, auth) and action results
 src/types/database.ts hand-written Supabase types checked against the migrations
 supabase/migrations/  the schema and the XP engine
 supabase/tests/       SQL assertions run by `npm run db:test`

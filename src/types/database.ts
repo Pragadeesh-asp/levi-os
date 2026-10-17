@@ -13,6 +13,18 @@ export type MissionStatus = "planned" | "active" | "completed" | "skipped" | "bl
 export type MissionPriority = "urgent" | "high" | "normal" | "low";
 export type ProgressStatus = "not_started" | "in_progress" | "done";
 export type FocusEndReason = "completed" | "discarded";
+export type ActionKind =
+  | "mission_created"
+  | "mission_status_changed"
+  | "mission_deleted"
+  | "habit_created"
+  | "habit_archived"
+  | "habit_restored"
+  | "habit_deleted"
+  | "habit_logged"
+  | "habit_unlogged"
+  | "time_zone_changed";
+export type ActionSubject = "mission" | "habit" | "profile";
 
 /**
  * Shapes of the objects Supabase returns. Kept hand-written (rather than generated)
@@ -203,6 +215,22 @@ export interface Database {
         Update: never;
         Relationships: [];
       };
+      action_log: {
+        Row: {
+          id: number;
+          user_id: string;
+          occurred_at: string;
+          kind: ActionKind;
+          subject: ActionSubject;
+          subject_id: string;
+          /** Status transitions, calendar dates and zone names only — never content. */
+          detail: Json;
+        };
+        /** Append-only: written by triggers, never by a client. */
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
     };
     Views: {
       quest_progress: {
@@ -267,6 +295,33 @@ export interface Database {
           elapsed_seconds: number;
           /** True only once the session has been ended and counted. */
           counted: boolean;
+        };
+        Relationships: [];
+      };
+      action_history: {
+        Row: {
+          id: number;
+          user_id: string;
+          occurred_at: string;
+          /** The caller's local calendar date the event happened on (derived). */
+          occurred_on: string;
+          kind: ActionKind;
+          subject: ActionSubject;
+          subject_id: string;
+          detail: Json;
+          /** The subject's current name, resolved live; null if it was deleted. */
+          subject_label: string | null;
+        };
+        Relationships: [];
+      };
+      xp_by_source: {
+        Row: {
+          user_id: string;
+          source: XpSource;
+          awarded: number;
+          adjusted: number;
+          net: number;
+          entries: number;
         };
         Relationships: [];
       };
@@ -351,6 +406,27 @@ export interface Database {
       reorder_missions: {
         Args: { p_mission_date: string; p_ids: string[] };
         Returns: number;
+      };
+      analytics_range: {
+        Args: { p_from: string; p_to: string; p_time_zone: string };
+        Returns: {
+          day: string;
+          xp_awarded: number;
+          xp_adjusted: number;
+          xp_net: number;
+          missions_total: number;
+          missions_completed: number;
+          missions_skipped: number;
+          missions_blocked: number;
+          missions_open: number;
+          habits_expected: number;
+          habits_logged: number;
+          steps_completed: number;
+          focus_sessions: number;
+          focus_completed: number;
+          focus_seconds: number;
+          achievements_unlocked: number;
+        }[];
       };
     };
     Enums: {

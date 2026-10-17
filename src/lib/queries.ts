@@ -1,4 +1,5 @@
 import { cache } from "react";
+import type { AnalyticsDay } from "@/lib/analytics";
 import { toCalendarDate } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
 import type { Tables, Views } from "@/types/database";
@@ -14,6 +15,8 @@ export type LevelHistoryRow = Views<"level_history">;
 export type AchievementRow = Tables<"achievements">;
 export type QuestStepRow = Tables<"quest_steps">;
 export type FocusSessionLogRow = Views<"focus_session_log">;
+export type ActionHistoryRow = Views<"action_history">;
+export type XpBySourceRow = Views<"xp_by_source">;
 
 export interface HabitSummary {
   habit_id: string;
@@ -279,6 +282,73 @@ export async function getRecentFocusSessions(supabase: SupabaseServerClient, lim
     .order("started_at", { ascending: false })
     .limit(limit);
   if (error) throw new Error(`Could not load recent focus sessions: ${error.message}`);
+  return data ?? [];
+}
+
+/**
+ * A span of local calendar days, summarised by the database in one call.
+ *
+ * The database returns exactly one row per day, including days with no records,
+ * so the caller never has to guess whether a gap means "nothing happened" or
+ * "the query stopped early".
+ */
+export async function getAnalyticsRange(
+  supabase: SupabaseServerClient,
+  from: string,
+  to: string,
+  timeZone: string,
+): Promise<AnalyticsDay[]> {
+  const { data, error } = await supabase.rpc("analytics_range", {
+    p_from: from,
+    p_to: to,
+    p_time_zone: timeZone,
+  });
+  if (error) throw new Error(`Could not load the analytics range: ${error.message}`);
+  return data ?? [];
+}
+
+/** Lifetime XP per source, split into awards and corrections by the ledger itself. */
+export async function getXpBySource(supabase: SupabaseServerClient): Promise<XpBySourceRow[]> {
+  const { data, error } = await supabase.from("xp_by_source").select("*").order("net", { ascending: false });
+  if (error) throw new Error(`Could not load XP by source: ${error.message}`);
+  return data ?? [];
+}
+
+/**
+ * The newest action-history events.
+ *
+ * The log starts with the release that introduced it, so an older account may
+ * legitimately have no rows: the screen says so instead of pretending the past
+ * can be reconstructed.
+ */
+export async function getRecentActions(
+  supabase: SupabaseServerClient,
+  limit = 10,
+): Promise<ActionHistoryRow[]> {
+  const { data, error } = await supabase
+    .from("action_history")
+    .select("*")
+    .order("occurred_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(`Could not load recent activity: ${error.message}`);
+  return data ?? [];
+}
+
+/** Every recorded event that happened on one local calendar day, newest first. */
+export async function getActionsForDay(
+  supabase: SupabaseServerClient,
+  date: string,
+  limit = 100,
+): Promise<ActionHistoryRow[]> {
+  const { data, error } = await supabase
+    .from("action_history")
+    .select("*")
+    .eq("occurred_on", date)
+    .order("occurred_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(`Could not load this day's activity: ${error.message}`);
   return data ?? [];
 }
 

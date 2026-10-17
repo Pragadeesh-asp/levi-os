@@ -22,7 +22,7 @@ every rule is the same:
 ├─────────────────────────────────────────────────────────────────┤
 │ Domain engines (pure, tested)                                   │
 │   progression.ts · habits.ts · finance.ts · dates.ts · review.ts│
-│   focus.ts · ordering.ts · input-validation.ts                  │
+│   focus.ts · ordering.ts · analytics.ts · input-validation.ts   │
 │   quest-validation.ts                                           │
 ├─────────────────────────────────────────────────────────────────┤
 │ PostgreSQL (supabase/migrations/**)                             │
@@ -226,13 +226,73 @@ Two consequences are deliberate:
 The screen `/review?date=` renders this row verbatim and computes nothing; the clamp that
 stops a review looking into the future lives in `src/lib/review.ts` and is unit-tested.
 
+Since Stage C, `day_summary` is literally the single-day case of `analytics_range` (§8.2),
+so the rules in the table above are shared by both entry points and cannot drift.
+
 Focus time on the same day comes from `focus_summary(p_date, p_time_zone)`, which follows
 the same local-day rule: a session belongs to the day it started on, an open session is
 reported as open and counts zero, and only a session ended as `completed` contributes
 seconds. The review screen lists the sessions beside the totals, so a discarded one is
 visibly a record and not a number.
 
-## 8. Authorization
+## 8. Action history and analytics
+
+Two questions had no single authority: *"what happened, in order?"* and *"how did the
+last N days actually go?"* Stage C adds one append-only store and one range read model.
+
+### 8.1 The action log
+
+`action_log` records only the transitions that **no other table keeps**:
+
+| Event | Why it is not derivable |
+| --- | --- |
+| `mission_created` / `mission_deleted` | deleting a mission takes its row (and every trace of it) away |
+| `mission_status_changed` | only the *current* status is stored; a skip → undo → skip sequence was lost |
+| `habit_created` / `habit_archived` / `habit_restored` / `habit_deleted` | `archived_at` holds only the latest value |
+| `habit_logged` / `habit_unlogged` | `habit_logs.completed` holds only the latest value |
+| `time_zone_changed` | `profiles.time_zone` is overwritten; the previous zone was lost |
+
+Events that already have an authoritative store are deliberately **not** copied in:
+focus sessions (`focus_sessions`), quest step completions (`quest_steps.completed_at`),
+achievement unlocks (`player_achievements`) and XP (`xp_ledger`). The log stores a
+`subject`/`subject_id` pointer plus content-free context — status values, calendar dates
+and zone names. Titles, notes, outcomes, reasons and evidence never enter it.
+`action_history` resolves the subject's *current* name under RLS at read time; a deleted
+subject simply has no name left to show. No backfill is attempted: the log starts with
+the migration that introduced it, and the screens say so.
+
+**Write path.** Security-definer triggers on `daily_missions`, `habits`, `habit_logs` and
+`profiles` write the rows, so a future write path cannot forget to log. They compare with
+`is distinct from`, so an idempotent `set_mission_status` / `log_habit` call cannot produce
+a duplicate event, and plan edits or reorders are not events. Clients hold SELECT only; an
+immutability trigger refuses updates and direct deletes. The one exception is a cascaded
+account deletion — the trigger recognises a foreign-key cascade (`pg_trigger_depth() > 1`)
+and the writers refuse to record an event for a user that no longer exists — so removing
+an account removes its private history instead of failing.
+
+### 8.2 The range read model
+
+`analytics_range(p_from, p_to, p_time_zone)` returns one row per **local calendar day**,
+ascending, including days with no records at all. Each rule is the one §7 documents:
+`mission_date` is already local; XP is bucketed by the local day `awarded_at` was written
+on; a focus session belongs to the day it started, and only a completed session contributes
+seconds; habits expected are reconstructed from `created_at` / `archived_at` plus the
+weekday schedule; step completions and achievements are bucketed by the local day recorded.
+The span is capped at 366 days, both dates are required, and the zone is validated against
+`pg_timezone_names`.
+
+`xp_by_source` groups the ledger by source into awards, adjustments and net, so a
+correction stays visible under the source it corrected. A discarded session is counted as
+started (`focus_sessions`) but never as focused time, and a reopened mission is not
+completed because its stored status is not `completed`.
+
+`src/lib/analytics.ts` is the only place that adds these rows up (`sumDays`), turns them
+into relative bars (`trendBars`), derives a percentage (`rate`, which returns `null` when
+there is no denominator rather than a fake zero) and describes an event (`describeAction`).
+The Command Center shows a 14-day trend, 7-day totals, the XP sources and recent activity;
+the day review shows the seven days ending on that date and the events recorded on it.
+
+## 9. Authorization
 
 - Every table used by a user is protected by **row level security** tied to `auth.uid()`.
 - `player_stats`, `level_history` and `quest_progress` are `security_invoker` views: they
@@ -249,8 +309,11 @@ visibly a record and not a number.
 - `focus_sessions` is **SELECT-only** for clients: writes are the two focus RPCs. That is a
   privilege restriction as well as a policy choice, so a crafted request cannot bypass the
   one-open-session rule or backdate a start.
+- `action_log` and its read views are **SELECT-only** for clients: the log has no
+  insert/update/delete policy, the trigger functions that write it are `security definer`
+  and revoked, and an immutability trigger refuses direct mutation.
 
-## 9. Achievements
+## 10. Achievements
 
 `sync_achievements()` is idempotent and re-runnable. It reads the canonical
 `player_stats` snapshot, inserts any newly earned rows into `player_achievements`
@@ -259,14 +322,14 @@ visibly a record and not a number.
 The TS catalogue in `src/lib/progression.ts` is display metadata; the SQL function is the
 authority.
 
-## 10. Money (prepared, not yet wired)
+## 11. Money (prepared, not yet wired)
 
 `src/lib/finance.ts` stores money as **integer minor units + ISO-4217 code** and never
 uses binary floating point. `parseMoney`/`toDecimalString` are exact, currency exponents
 (JPY = 0, KWD = 3 …) are honoured, and `budgetUsage` avoids divide-by-zero. The matching
 SQL storage convention is `numeric`/`bigint` minor units. No table or screen uses it yet.
 
-## 11. Testing strategy
+## 12. Testing strategy
 
 | Layer | How it is verified |
 | --- | --- |

@@ -5,7 +5,7 @@ Honest, per-feature status. **Statuses:** ✅ verified · 🟡 partial · ⏭ no
 code merely exists.
 
 _Last verified: 2026-10-18. Commands: `npm run lint` · `npm run typecheck` · `npm test`
-(75 passed) · `npm run db:test` (9 migrations, 122 assertions) · `npm run build`._
+(89 passed) · `npm run db:test` (10 migrations, 160 assertions) · `npm run build`._
 
 ## Foundation
 
@@ -40,7 +40,7 @@ _Last verified: 2026-10-18. Commands: `npm run lint` · `npm run typecheck` · `
 | Evidence-backed step completion | ✅ | `complete_quest_step` (previously broken — see audit §4.1) |
 | Rewards on completion | ✅ | 250 XP subquest, 1000 XP main quest |
 | Derived progress + status | ✅ | `quest_progress` (security_invoker), read-only in the UI |
-| Replayable migrations | ✅ | `db:test` applies all seven in order (previously failed — audit §4.2) |
+| Replayable migrations | ✅ | `db:test` applies all ten in order (previously failed — audit §4.2) |
 
 ## Daily loop
 
@@ -91,7 +91,28 @@ _Last verified: 2026-10-18. Commands: `npm run lint` · `npm run typecheck` · `
 | Focus sessions on the day | ✅ | `focus_summary` + `focus_session_log`; discarded sessions are listed but not counted |
 | Cannot look into the future | ✅ | `resolveReviewDate` clamps to today; `src/lib/review.test.ts` |
 | Date navigation | ✅ | previous / next / today + a date picker (`max` = today) |
+| Seven-day context | ✅ | `analytics_range` for the 14 days ending on the reviewed date; last seven and previous seven shown side by side |
+| Activity recorded that day | ✅ | `action_history` filtered by its derived local day; an empty state says the log is not retroactive |
 | Read-only by design | ✅ | resolving work stays on `/missions` and `/habits`, which it links to |
+
+## Analytics and action history
+
+| Feature | Status | Evidence / notes |
+| --- | --- | --- |
+| Append-only action log | ✅ | `action_log`; SELECT-only + RLS, immutability trigger; _"the action log is append-only"_, _"a direct delete … is refused"_ |
+| Mission lifecycle events | ✅ | create / status / delete triggers; _"every real status transition is recorded exactly once"_, _"editing a plan is not a history event"_ |
+| Habit log corrections + archive | ✅ | logged / un-logged / archived / restored / deleted; _"a habit day logged, un-logged and logged again leaves three events, not five"_ |
+| Time-zone changes | ✅ | old and new zone recorded once; _"the time-zone event names both the previous zone and the new one"_ |
+| No second XP ledger | ✅ | the log stores no amounts and is never consulted for XP; `xp_ledger` remains the only ledger |
+| No duplication of authoritative events | ✅ | focus sessions, quest steps, achievements and XP are read from their own tables — never copied into the log |
+| Private by default | ✅ | own-rows RLS on `action_log` / `action_history`; _"another user's action history is invisible"_ |
+| Account deletion cascade | ✅ | a removed account takes its private history; _"removing an account removes its private history instead of blocking the delete"_ |
+| One range read model | ✅ | `analytics_range(from, to, tz)`; `day_summary` is its single-day case; 366-day cap and input guards |
+| Local-day correctness | ✅ | XP bucketed by local `awarded_at`; _"an XP entry belongs to the local day it was written on"_ |
+| Trends that cannot lie | ✅ | discarded focus adds no time, reopened missions are not completed, zero days are real rows not gaps |
+| XP by source | ✅ | `xp_by_source` (awards / adjustments / net per source) |
+| Weekly comparison | ✅ | last seven vs previous seven on `/review`, computed by `sumDays` |
+| Empty / loading / error states | ✅ | route skeleton + error boundary; explicit empty states on both new panels |
 
 ## Command Center
 
@@ -102,6 +123,9 @@ _Last verified: 2026-10-18. Commands: `npm run lint` · `npm run typecheck` · `
 | Habits due vs logged today | ✅ | local-date aware |
 | Active quests with progress | ✅ | from `quest_progress` |
 | Recent XP ledger entries | ✅ | from `level_history` |
+| 14-day momentum + 7-day totals | ✅ | `analytics_range`; net-XP bars, missions, focus, habits, achievements |
+| XP by source | ✅ | `xp_by_source`, read from the append-only ledger |
+| Recent action history | ✅ | `action_history`; its empty state says the log is not retroactive |
 | Achievement gallery | ✅ | from `achievements` + `player_achievements` |
 | No mock/preview data anywhere | ✅ | app routes build as `ƒ`; empty states used |
 
@@ -131,17 +155,19 @@ _Last verified: 2026-10-18. Commands: `npm run lint` · `npm run typecheck` · `
 | Knowledge library | ⏭ | stage E |
 | Finance (accounts, transactions, budgets) | 🟡 | engine tested; tables/UI in stage F |
 | Read-only AI advisor | 🔒 ⏭ | stage F (needs a provider key; read-only half can ship first) |
-| Advanced analytics / trends | 🟡 | `day_summary` exists; trends in stage C |
 
 ## Known limitations
 
 - The Supabase migrations have **not** been applied to the remote project; the remote
   schema is unknown. Nothing here asserts the remote state.
 - **Authenticated UI flows are not exercised by the repository's checks.** Focus sessions,
-  mission ordering and the day review are asserted at the database level and their routes
-  build as dynamic, but no signed-in click-through is performed here (there is no test
-  account or local auth stack). That verification is owner-run — see
-  `docs/IMPLEMENTATION_PLAN.md` Part 4.
+  mission ordering, the day review, the analytics panels and the action history are asserted
+  at the database level and their routes build as dynamic, but no signed-in click-through is
+  performed here (there is no test account or local auth stack). That verification is
+  owner-run — see `docs/IMPLEMENTATION_PLAN.md` Part 4.
+- **The action history is not retroactive.** It records events from the migration that
+  introduced it onward. Nothing before that was stored, so neither the log nor the charts
+  pretend to reconstruct it; an older day legitimately shows "nothing recorded".
 - Auth email delivery depends on the Supabase project's configuration and cannot be
   verified from the repository.
 - `AGENTS.md` / `CLAUDE.md` are generated/maintained tooling notes at the repo root and
