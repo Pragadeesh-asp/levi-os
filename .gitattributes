@@ -1,0 +1,18 @@
+# Store and check out text files with LF on every OS (stops the
+# "LF will be replaced by CRLF" warnings from core.autocrlf on Windows).
+* text=auto eol=lf
+
+# Windows scripts keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary

@@ -2,15 +2,21 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - run: npm install
+        with: { node-version: 22, cache: npm }
+      # npm ci installs exactly what package-lock.json records (npm install may rewrite it).
+      - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
