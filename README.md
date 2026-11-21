@@ -75,9 +75,3 @@ supabase/migrations/  the schema and the XP engine
 supabase/tests/       SQL assertions run by `npm run db:test`
 scripts/db-verify.mjs the ephemeral-database harness
 ```
-
-## Heritage
-
-The original repository contained a single standalone `Index.html` (an interactive
-birthday-message site). It is preserved as a legacy artifact and is not part of the LEVI OS
-runtime.
