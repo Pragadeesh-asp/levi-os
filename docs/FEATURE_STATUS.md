@@ -28,7 +28,7 @@ _Last verified: 2026-10-18. Commands: `npm run lint` · `npm run typecheck` · `
 | Idempotent awards | ✅ | `unique (user_id, source, source_id)`; _"completing twice never double-awards"_ |
 | Auditable corrections | ✅ | balanced adjustments; _"the reopen appends an auditable adjustment instead of deleting history"_ |
 | Level formula (TS + SQL) | ✅ | `progression.test.ts`; _"player stats level is 3 at 1250 XP"_ |
-| XP history view | ✅ | `level_history`; rendered on the Command Center |
+| XP history view | ✅ | `level_history`; rendered on Today (`/dashboard`) |
 | Achievements | ✅ | `sync_achievements`; _"re-running achievement sync unlocks nothing new"_ |
 | Canonical player stats | ✅ | `player_stats`; _"a new user starts at 0 XP"_ |
 
@@ -54,7 +54,7 @@ _Last verified: 2026-10-18. Commands: `npm run lint` · `npm run typecheck` · `
 | Mission undo (skip/block → planned) | ✅ | "Undo" action; the reason is retracted, because the mission was not really skipped |
 | Persistent mission order (↑ / ↓) | ✅ | `moveMission` → `reorder_missions`; the whole day is rebuilt server-side and positions become `0..n-1` |
 | Invalid orders rejected | ✅ | assertions for duplicates, a partial list, a null entry, another day's mission and another user's mission |
-| Order survives a refresh | ✅ | `getMissionsForDate` orders by `(position, created_at)`; `/missions` and the Command Center's "next up" use it |
+| Order survives a refresh | ✅ | `getMissionsForDate` orders by `(position, created_at)`; `/missions` and Today's "next up" use it |
 | Priority is a label, not the order | ✅ | the open list is the user's saved order; priority is shown as a badge on the card |
 | Habits with weekday schedules | ✅ | `/habits` |
 | Habit logs (SELECT-only for clients) | ✅ | `log_habit` RPC; _"clients cannot write habit logs directly"_ |
@@ -114,7 +114,7 @@ _Last verified: 2026-10-18. Commands: `npm run lint` · `npm run typecheck` · `
 | Weekly comparison | ✅ | last seven vs previous seven on `/review`, computed by `sumDays` |
 | Empty / loading / error states | ✅ | route skeleton + error boundary; explicit empty states on both new panels |
 
-## Command Center
+## Today (dashboard)
 
 | Feature | Status | Evidence / notes |
 | --- | --- | --- |

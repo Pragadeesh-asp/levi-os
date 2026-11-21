@@ -16,7 +16,7 @@ from it, and nothing is ever hard-coded or sampled.
 ## What works today
 
 - **Auth** — passwordless magic link, session-guarded app shell.
-- **Command Center** (`/dashboard`) — level, XP progress, today's missions, habits due,
+- **Today** (`/dashboard`, formerly "Command Center") — level, XP progress, today's missions, habits due,
   active quests, recent XP and achievements, plus a 14-day momentum trend, XP by source and
   recent activity, all from real records.
 - **Missions** (`/missions`) — plan any calendar day; complete, skip or block with a

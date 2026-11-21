@@ -24,7 +24,7 @@ import {
 } from "@/lib/queries";
 import { formatXp } from "@/lib/utils";
 
-export const metadata: Metadata = { title: "Command Center · LEVI OS" };
+export const metadata: Metadata = { title: "Today · LEVI OS" };
 
 const EMPTY_STATS: PlayerStats = {
   user_id: "",
@@ -54,7 +54,7 @@ function signedXp(amount: number): string {
 export default async function DashboardPage() {
   if (!isSupabaseConfigured()) return <ConfigurationNotice />;
   const session = await getSessionContext();
-  if (!session) return <SignedOutState module="Command center" />;
+  if (!session) return <SignedOutState module="Today" />;
   const { supabase, today, timeZone, displayName } = session;
 
   const momentumFrom = addDays(today, -13);
@@ -106,7 +106,7 @@ export default async function DashboardPage() {
   return (
     <div className="stack" style={{ gap: 18 }}>
       <PageHeader
-        eyebrow="Command center"
+        eyebrow="Today"
         title={displayName ? `What matters right now, ${displayName}?` : "What matters right now?"}
         description={`Today is ${today} in ${timeZone}. Every number below is derived from records you saved — nothing is estimated.`}
         actions={
