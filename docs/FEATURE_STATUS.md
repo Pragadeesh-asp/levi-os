@@ -16,6 +16,8 @@ _Last verified: 2026-10-18. Commands: `npm run lint` · `npm run typecheck` · `
 | Supabase client/server adapters | ✅ | `src/lib/supabase/{client,server}.ts` |
 | Magic-link auth | ✅ | `src/app/login/page.tsx`, `/auth/callback`; session-guarded layout |
 | Sign out | ✅ | `POST /auth/signout` → redirect `/login` (POST only, never GET) |
+| Failed sign-in links explained | ✅ | `/auth/callback` redirects to `/login?problem=…` (expired, different browser, generic); `src/lib/auth-callback.test.ts` (5 tests). Not yet clicked through against a live Supabase project |
+| Session refresh proxy | ✅ | `src/proxy.ts` refreshes the Supabase session before every request; `src/proxy.test.ts` (7 tests) |
 | Unconfigured setup notice | ✅ | `ConfigurationNotice` instead of a crash |
 | Error boundary + retry | ✅ | `src/app/(app)/error.tsx` |
 | Loading skeleton | ✅ | `src/app/(app)/loading.tsx` |
