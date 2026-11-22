@@ -13,7 +13,7 @@ _Last verified: 2026-10-18. Commands: `npm run lint` · `npm run typecheck` · `
 | --- | --- | --- |
 | Next.js 16 App Router + TypeScript | ✅ | `npm run build` succeeds |
 | Tailwind v4 + design tokens | ✅ | `src/app/globals.css`: the Sakuga "paper" look (white paper, indigo ink, periwinkle and lavender, pink accent, hard offset shadows), light only, reduced-motion respected |
-| Anime reactions on XP moments | ✅ | sakuga-vfx (MIT, vendored unchanged, see `docs/THIRD_PARTY.md`): impact burst on **Complete** and **Log today**, a check only after the save succeeds, and a toast for unlocked achievements. Build, lint and type-check pass; not yet clicked through signed in |
+| Anime reactions on XP moments | ✅ | sakuga-vfx (MIT, vendored unchanged, see `docs/THIRD_PARTY.md`): impact burst on **Complete** and **Log today**, a check only after the save succeeds, and a toast for unlocked achievements, both played from inside the action (`src/lib/reward.ts`, unit-tested). Build, lint and type-check pass; not yet clicked through signed in |
 | Supabase client/server adapters | ✅ | `src/lib/supabase/{client,server}.ts` |
 | Magic-link auth | ✅ | `src/app/login/page.tsx`, `/auth/callback`; session-guarded layout |
 | Sign out | ✅ | `POST /auth/signout` → redirect `/login` (POST only, never GET) |

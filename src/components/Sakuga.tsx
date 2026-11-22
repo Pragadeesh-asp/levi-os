@@ -2,16 +2,16 @@
 
 import Script from "next/script";
 import { useEffect, useRef, useState } from "react";
-import type { ActionResult } from "@/lib/action-result";
+import type { Ref } from "react";
+import { ACHIEVEMENT_EVENT } from "@/lib/reward";
 import type { SakugaButtonElement, SakugaToastElement } from "@/types/sakuga-vfx";
 
 /**
  * LEVI OS's use of sakuga-vfx: anime-style reactions on the moments that earn
  * XP. The elements are progressive enhancement: until their scripts load, the
  * page renders ordinary buttons, and prefers-reduced-motion turns the effects off.
+ * The reward itself (the check and the toast) is played by reward() in lib/reward.ts.
  */
-
-const ACHIEVEMENT_EVENT = "levi:achievements";
 
 /** Loads the vendored elements once for the signed-in app. */
 export function SakugaScripts() {
@@ -37,46 +37,48 @@ function useDefined(tag: string): boolean {
   return defined;
 }
 
-/** Announces achievements unlocked by an action; AchievementToast shows them. */
-export function celebrate(names: readonly string[]) {
-  if (names.length === 0) return;
-  window.dispatchEvent(new CustomEvent<string[]>(ACHIEVEMENT_EVENT, { detail: [...names] }));
-}
-
 /**
- * A submit button that plays the impact frame (squash, burst, ドン!) when
- * pressed and lands a check once the server action reports success. The click
- * reaction plays either way; the check only appears when the work was saved.
+ * A submit button that plays the impact frame (squash, burst, ドン!) when pressed.
+ * ActionForm holds its ref and lands the check through reward() once the server
+ * action reports success. While the action saves, the button is disabled and marked
+ * `data-saving`, which globals.css uses to keep the impact at full strength.
  */
 export function ImpactSubmit({
+  ref,
   label,
-  result,
+  pendingLabel,
+  pending = false,
   disabled,
   title,
   describedBy,
 }: {
+  ref?: Ref<SakugaButtonElement>;
   label: string;
-  result: ActionResult | null;
+  /** Shown by the plain fallback while saving; the animated button keeps its label. */
+  pendingLabel?: string;
+  pending?: boolean;
   disabled?: boolean;
   title?: string;
   describedBy?: string;
 }) {
   const defined = useDefined("sakuga-button");
-  const ref = useRef<SakugaButtonElement>(null);
-
-  useEffect(() => {
-    if (result?.ok) ref.current?.done();
-  }, [result]);
 
   if (!defined) {
     return (
-      <button className="button" type="submit" disabled={disabled} title={title} aria-describedby={describedBy}>
-        {label}
+      <button className="button" type="submit" disabled={pending || disabled} title={title} aria-describedby={describedBy}>
+        {pending ? (pendingLabel ?? label) : label}
       </button>
     );
   }
   return (
-    <sakuga-button ref={ref} type="submit" disabled={disabled} title={title} aria-describedby={describedBy}>
+    <sakuga-button
+      ref={ref}
+      type="submit"
+      disabled={pending || disabled}
+      data-saving={pending ? "" : undefined}
+      title={title}
+      aria-describedby={describedBy}
+    >
       {label}
     </sakuga-button>
   );

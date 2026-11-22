@@ -230,7 +230,7 @@ export default async function DashboardPage() {
                 <span className="faint">
                   {range[0]?.day} → {range[range.length - 1]?.day}
                 </span>
-                <span className="faint">red = corrections outweighed awards</span>
+                <span className="faint">pink = today · red = corrections outweighed awards</span>
               </div>
 
               <div className="grid">

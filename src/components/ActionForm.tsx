@@ -1,9 +1,11 @@
 "use client";
 
-import { useActionState, useEffect, useId } from "react";
+import { useActionState, useId, useRef } from "react";
 import type { ReactNode } from "react";
 import type { ActionResult } from "@/lib/action-result";
-import { ImpactSubmit, celebrate } from "./Sakuga";
+import { reward } from "@/lib/reward";
+import type { SakugaButtonElement } from "@/types/sakuga-vfx";
+import { ImpactSubmit } from "./Sakuga";
 
 export type ServerAction = (state: ActionResult | null, formData: FormData) => Promise<ActionResult>;
 
@@ -44,13 +46,16 @@ export function ActionForm({
   /** "impact": the sakuga-vfx button for moments that earn XP. Text-label buttons only. */
   effect?: "impact";
 }) {
-  const [state, formAction, pending] = useActionState(action, null);
+  const impact = useRef<SakugaButtonElement>(null);
+  // The reward plays inside the action, before React commits the result: completing a
+  // mission swaps Complete for Reopen in that commit, so an effect here would never see
+  // the success. reward() explains the short beat it holds for the check.
+  const [state, formAction, pending] = useActionState<ActionResult | null, FormData>(async (previous, formData) => {
+    const result = await action(previous, formData);
+    await reward(result, effect === "impact" ? impact.current : null);
+    return result;
+  }, null);
   const statusId = useId();
-
-  // Every new successful result with unlocked achievements gets the toast.
-  useEffect(() => {
-    if (state?.ok && state.unlocked?.length) celebrate(state.unlocked);
-  }, [state]);
 
   return (
     <form
@@ -69,9 +74,11 @@ export function ActionForm({
         <div className="row">
           {effect === "impact" ? (
             <ImpactSubmit
-              label={pending ? pendingLabel : submitLabel}
-              result={state}
-              disabled={pending || disabled}
+              ref={impact}
+              label={submitLabel}
+              pendingLabel={pendingLabel}
+              pending={pending}
+              disabled={disabled}
               title={title}
               describedBy={statusId}
             />
