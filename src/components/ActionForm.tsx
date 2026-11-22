@@ -1,8 +1,9 @@
 "use client";
 
-import { useActionState, useId } from "react";
+import { useActionState, useEffect, useId } from "react";
 import type { ReactNode } from "react";
 import type { ActionResult } from "@/lib/action-result";
+import { ImpactSubmit, celebrate } from "./Sakuga";
 
 export type ServerAction = (state: ActionResult | null, formData: FormData) => Promise<ActionResult>;
 
@@ -25,6 +26,7 @@ export function ActionForm({
   disabled,
   ariaLabel,
   title,
+  effect,
 }: {
   action: ServerAction;
   children: ReactNode;
@@ -39,9 +41,16 @@ export function ActionForm({
   /** Accessible name for a button whose visible text is a glyph. */
   ariaLabel?: string;
   title?: string;
+  /** "impact": the sakuga-vfx button for moments that earn XP. Text-label buttons only. */
+  effect?: "impact";
 }) {
   const [state, formAction, pending] = useActionState(action, null);
   const statusId = useId();
+
+  // Every new successful result with unlocked achievements gets the toast.
+  useEffect(() => {
+    if (state?.ok && state.unlocked?.length) celebrate(state.unlocked);
+  }, [state]);
 
   return (
     <form
@@ -58,16 +67,26 @@ export function ActionForm({
           : null}
         {children}
         <div className="row">
-          <button
-            className={submitClassName}
-            type="submit"
-            disabled={pending || disabled}
-            aria-label={ariaLabel}
-            title={title}
-            aria-describedby={statusId}
-          >
-            {pending ? pendingLabel : submitLabel}
-          </button>
+          {effect === "impact" ? (
+            <ImpactSubmit
+              label={pending ? pendingLabel : submitLabel}
+              result={state}
+              disabled={pending || disabled}
+              title={title}
+              describedBy={statusId}
+            />
+          ) : (
+            <button
+              className={submitClassName}
+              type="submit"
+              disabled={pending || disabled}
+              aria-label={ariaLabel}
+              title={title}
+              aria-describedby={statusId}
+            >
+              {pending ? pendingLabel : submitLabel}
+            </button>
+          )}
         </div>
         <div id={statusId}>
           {state && !state.ok && state.error ? (
@@ -100,6 +119,7 @@ export function ActionButton({
   disabled,
   ariaLabel,
   title,
+  effect,
 }: {
   action: ServerAction;
   label: string;
@@ -110,6 +130,8 @@ export function ActionButton({
   disabled?: boolean;
   ariaLabel?: string;
   title?: string;
+  /** "impact" for completions that earn XP; see ActionForm. */
+  effect?: "impact";
 }) {
   return (
     <ActionForm
@@ -122,6 +144,7 @@ export function ActionButton({
       disabled={disabled}
       ariaLabel={ariaLabel}
       title={title}
+      effect={effect}
     >
       {confirm ? <input type="hidden" name="confirm" value="yes" /> : null}
     </ActionForm>

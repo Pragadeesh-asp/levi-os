@@ -29,7 +29,7 @@ export default function AppError({ error, retry }: { error: Error & { digest?: s
             Try again
           </button>
           <a className="button secondary" href="/dashboard">
-            Back to command center
+            Back to Today
           </a>
         </div>
         {error.digest ? <p className="faint">Reference: {error.digest}</p> : null}

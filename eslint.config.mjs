@@ -5,5 +5,6 @@ import nextTs from "eslint-config-next/typescript";
 export default defineConfig([
   ...nextVitals,
   ...nextTs,
-  globalIgnores([".next/**", "node_modules/**", "coverage/**"]),
+  // public/sakuga-vfx holds vendored third-party files, kept byte-identical to upstream.
+  globalIgnores([".next/**", "node_modules/**", "coverage/**", "public/sakuga-vfx/**"]),
 ]);

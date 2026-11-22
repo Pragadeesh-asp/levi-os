@@ -85,6 +85,7 @@ export function HabitCard({
             label={scheduledToday ? "Log today" : "Log today (extra)"}
             fields={{ habitId: habit.habit_id, logDate: today, completed: "true" }}
             pendingLabel="Logging…"
+            effect="impact"
           />
         )}
       </div>

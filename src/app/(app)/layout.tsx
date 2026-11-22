@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { MobileNav, SidebarNav } from "@/components/nav";
+import { AchievementToast, SakugaScripts } from "@/components/Sakuga";
 import { getSessionContext, isSupabaseConfigured } from "@/lib/queries";
 
 /**
@@ -38,6 +39,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           {children}
         </main>
       </div>
+      {/* Anime reactions for XP moments (sakuga-vfx, MIT). Signed-in shell only. */}
+      <SakugaScripts />
+      <AchievementToast />
     </div>
   );
 }

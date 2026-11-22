@@ -100,6 +100,7 @@ export function MissionCard({
             action={setMissionStatus}
             label="Complete"
             fields={{ missionId: mission.id, status: "completed", outcome: mission.outcome ?? "" }}
+            effect="impact"
           />
         ) : null}
         {mission.status === "completed" ? (
