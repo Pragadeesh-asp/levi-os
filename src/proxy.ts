@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "@/types/database";
+import { supabaseProjectUrl } from "./lib/supabase/project-url";
 
 /**
  * Session refresh at the network boundary — Next 16's renamed middleware file.
@@ -19,7 +20,7 @@ import type { Database } from "@/types/database";
  * the app layout, and the magic-link callback (`/auth/callback`) must keep working.
  */
 export async function proxy(request: NextRequest) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const url = supabaseProjectUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   // Without configuration the app renders its setup notice; never fail every request.
   if (!url || !key) return NextResponse.next();
