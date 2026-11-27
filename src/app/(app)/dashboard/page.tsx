@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Badge, ConfigurationNotice, EmptyState, PageHeader, Panel, ProgressBar, SignedOutState, StatTile } from "@/components/ui";
 import { describeAction, rate, sumDays, trendBars, XP_SOURCE_LABELS } from "@/lib/analytics";
-import { addDays, toCalendarDate, toLocalTime } from "@/lib/dates";
+import { addDays, isoWeekday, toCalendarDate, toLocalTime } from "@/lib/dates";
 import { formatDuration } from "@/lib/focus";
 import { isScheduledOn, scheduleFromWeekdays } from "@/lib/habits";
 import {
@@ -123,6 +123,12 @@ export default async function DashboardPage() {
           </>
         }
       />
+
+      {isoWeekday(today) === 7 ? (
+        <a className="notice success" href="/week">
+          It&apos;s Sunday: your weekly review is ready. Look back at the week and set next week&apos;s three missions →
+        </a>
+      ) : null}
 
       <div className="grid">
         <Panel>

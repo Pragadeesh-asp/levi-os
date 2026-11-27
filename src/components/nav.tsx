@@ -10,6 +10,7 @@ const LINKS = [
   { href: "/quests", label: "Quests" },
   { href: "/focus", label: "Focus" },
   { href: "/review", label: "Day review" },
+  { href: "/week", label: "Week" },
   { href: "/settings", label: "Settings" },
 ] as const;
 

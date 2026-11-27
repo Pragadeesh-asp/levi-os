@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { ActionForm } from "@/components/ActionForm";
 import { HabitCard } from "@/components/HabitCard";
+import { HabitHeatmap } from "@/components/HabitHeatmap";
+import { buildHeatmap } from "@/lib/heatmap";
 import { ConfigurationNotice, EmptyState, Field, PageHeader, Panel, SignedOutState } from "@/components/ui";
 import { addDays } from "@/lib/dates";
 import { consistency, isScheduledOn, scheduleFromWeekdays, type HabitLogRecord } from "@/lib/habits";
@@ -31,11 +33,13 @@ export default async function HabitsPage() {
   const { supabase, today } = session;
 
   const windowStart = addDays(today, -29);
-  const [summaries, logs, archived] = await Promise.all([
+  const [summaries, logs, archived, yearLogs] = await Promise.all([
     getHabitSummaries(supabase, today),
     getHabitLogsBetween(supabase, windowStart, today),
     getArchivedHabits(supabase),
+    getHabitLogsBetween(supabase, addDays(today, -371), today),
   ]);
+  const heatmap = buildHeatmap(yearLogs, today);
 
   const logsByHabit = new Map<string, HabitLogRecord[]>();
   for (const log of logs) {
@@ -77,6 +81,14 @@ export default async function HabitsPage() {
           <p className="faint">Longest active run of scheduled days</p>
         </Panel>
       </div>
+
+      <Panel>
+        <div className="stack-sm">
+          <p className="eyebrow">Year</p>
+          <h2>Every day you showed up</h2>
+          <HabitHeatmap map={heatmap} today={today} />
+        </div>
+      </Panel>
 
       <Panel>
         <div className="stack-sm">

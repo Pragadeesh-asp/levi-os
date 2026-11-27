@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { MobileNav, SidebarNav } from "@/components/nav";
 import { AchievementToast, SakugaScripts } from "@/components/Sakuga";
-import { getSessionContext, isSupabaseConfigured } from "@/lib/queries";
+import { LevelUpMoment } from "@/components/LevelUpMoment";
+import { getPlayerStats, getSessionContext, isSupabaseConfigured } from "@/lib/queries";
 
 /**
  * The signed-in application shell.
@@ -27,6 +28,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     );
   }
 
+  // The level only drives the level-up moment; if stats can't load, the pages say why.
+  const level = await getPlayerStats(session.supabase).then((stats) => stats?.level ?? null, () => null);
+
   return (
     <div className="app">
       <a className="skip-link" href="#main">
@@ -42,6 +46,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       {/* Anime reactions for XP moments (sakuga-vfx, MIT). Signed-in shell only. */}
       <SakugaScripts />
       <AchievementToast />
+      <LevelUpMoment level={level} />
     </div>
   );
 }
